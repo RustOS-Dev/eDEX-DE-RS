@@ -2309,6 +2309,7 @@ dependencies = [
  "anyhow",
  "insta",
  "tracing",
+ "ui",
  "unicode-width",
  "xkbcommon 0.9.0",
 ]

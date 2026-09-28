@@ -8,6 +8,7 @@ repository.workspace = true
 description = "eDEX-DE terminal emulator (alacritty_terminal)"
 
 [dependencies]
+ui = { path = "../ui" }
 alacritty_terminal = { workspace = true }
 xkbcommon = { workspace = true }
 unicode-width = { workspace = true }
