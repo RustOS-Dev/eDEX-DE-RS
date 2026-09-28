@@ -1,34 +1,28 @@
 [package]
-name = "edex-de"
+name = "edex-greeter"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE — sci-fi desktop shell for Hyprland"
-default-run = "edex-de"
+description = "eDEX-DE greetd greeter"
 
 [[bin]]
-name = "edex-de"
+name = "edex-greeter"
 path = "src/main.rs"
 
 [dependencies]
 platform = { path = "../platform" }
 renderer = { path = "../renderer" }
 ui = { path = "../ui" }
-terminal = { path = "../terminal" }
-launcher = { path = "../launcher" }
-settings = { path = "../settings" }
-sysmon = { path = "../sysmon" }
-notifications = { path = "../notifications" }
-hypr = { path = "../hypr" }
-ipc = { path = "../ipc" }
 system = { path = "../system" }
-calloop = { workspace = true }
+greetd_ipc = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+chrono = { workspace = true }
 xkbcommon = { workspace = true }
-serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
-chrono = { workspace = true }
 clap = { workspace = true }
+image = { workspace = true }

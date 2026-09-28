@@ -1,21 +1,20 @@
 [package]
-name = "launcher"
+name = "system"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE app launcher"
+description = "eDEX-DE system crate"
 
 [dependencies]
-fuzzy-matcher = { workspace = true }
+zbus = { workspace = true }
+async-io = { workspace = true }
+futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
 anyhow = { workspace = true }
-xdg = { workspace = true }
+tracing = { workspace = true }
+roxmltree = { workspace = true }
 rustix = { workspace = true }
 libc = { workspace = true }
-
-[dev-dependencies]
-tempfile = { workspace = true }

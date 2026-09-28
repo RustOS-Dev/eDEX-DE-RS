@@ -5,9 +5,12 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE in-process notification store"
+description = "eDEX-DE org.freedesktop.Notifications server"
 
 [dependencies]
+zbus = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+xdg = { workspace = true }

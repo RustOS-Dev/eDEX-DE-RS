@@ -1,0 +1,21 @@
+[package]
+name = "platform"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "eDEX-DE platform crate"
+
+[dependencies]
+smithay-client-toolkit = { workspace = true }
+calloop = { workspace = true }
+calloop-wayland-source = { workspace = true }
+wayland-client = { workspace = true }
+wayland-backend = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-cursor = { workspace = true }
+raw-window-handle = { workspace = true }
+xkbcommon = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

@@ -1,0 +1,57 @@
+---
+source: ui/src/layout.rs
+expression: l
+---
+PanelLayout {
+    width: 3840.0,
+    height: 2160.0,
+    status_bar: Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 3840.0,
+        h: 28.0,
+    },
+    top_bar: Rect {
+        x: 0.0,
+        y: 28.0,
+        w: 3840.0,
+        h: 40.0,
+    },
+    filesystem: Rect {
+        x: 0.0,
+        y: 68.0,
+        w: 768.0,
+        h: 1868.0,
+    },
+    terminal: Rect {
+        x: 768.0,
+        y: 68.0,
+        w: 2227.0,
+        h: 1868.0,
+    },
+    sysinfo: Rect {
+        x: 2995.0,
+        y: 68.0,
+        w: 845.0,
+        h: 1868.0,
+    },
+    keyboard: Rect {
+        x: 0.0,
+        y: 1936.0,
+        w: 3840.0,
+        h: 224.0,
+    },
+    fs_handle: Rect {
+        x: 765.0,
+        y: 68.0,
+        w: 6.0,
+        h: 1868.0,
+    },
+    sysinfo_handle: Rect {
+        x: 2992.0,
+        y: 68.0,
+        w: 6.0,
+        h: 1868.0,
+    },
+    key_h: 36.0,
+}

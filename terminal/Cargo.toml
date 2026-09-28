@@ -5,13 +5,14 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE terminal emulator (termwiz + portable-pty)"
+description = "eDEX-DE terminal emulator (alacritty_terminal)"
 
 [dependencies]
-termwiz = { workspace = true }
-portable-pty = { workspace = true }
-vte = { workspace = true }
+alacritty_terminal = { workspace = true }
 xkbcommon = { workspace = true }
+unicode-width = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }

@@ -1,12 +1,14 @@
 [package]
-name = "sysmon"
+name = "hypr"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE system statistics and privacy probes"
+description = "eDEX-DE hypr crate"
 
 [dependencies]
-sysinfo = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
 tracing = { workspace = true }

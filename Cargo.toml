@@ -1,71 +1,74 @@
 [workspace]
 members = [
     "edex-de",
-    "compositor",
+    "edex-greeter",
+    "platform",
     "renderer",
+    "ui",
     "terminal",
     "launcher",
     "settings",
     "sysmon",
     "notifications",
+    "hypr",
+    "ipc",
+    "system",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "3.0.0"
 edition = "2021"
 authors = ["eDEX-OS"]
 license = "GPL-3.0"
 repository = "https://github.com/eDEX-OS/eDEX-DE"
 
 [workspace.dependencies]
-# Compositor
-smithay = { version = "0.7.0", features = [
-    "backend_drm",
-    "backend_gbm",
-    "backend_egl",
-    "backend_libinput",
-    "backend_udev",
-    "backend_session_libseat",
-    "renderer_gl",
-    "renderer_glow",
-    "renderer_pixman",
-    "renderer_multi",
-    "wayland_frontend",
-    "desktop",
-    "xwayland",
-] }
-# smithay-drm-extras = "0.1.0"  # Added in Phase 1 when EDID support is implemented
-calloop = { version = "0.14", features = ["futures-io"] }
-wayland-server = "0.31"
+# Wayland client stack
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
+calloop = { version = "0.14", features = ["signals"] }
+calloop-wayland-source = "0.4"
 wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-cursor = "0.31"
 raw-window-handle = "0.6"
-
-# GPU / Rendering
-wgpu = { version = "29.0.3", features = ["vulkan", "spirv"] }
-glyphon = "0.11.0"
-cosmic-text = "0.12"
-fontdue = "0.9"
-bytemuck = { version = "1", features = ["derive"] }
-
-# Terminal
-termwiz = "0.23.3"
-portable-pty = "0.9.0"
-vte = "0.15"
 xkbcommon = { version = "0.9", features = ["wayland"] }
 
-# System info
-sysinfo = "0.39.2"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# GPU / text
+wgpu = { version = "29.0.3", default-features = false, features = ["vulkan", "gles", "wgsl"] }
+glyphon = "0.11.0"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Terminal
+alacritty_terminal = "0.26"
+unicode-width = "0.2"
+
+# System
+sysinfo = "0.39"
+zbus = { version = "5", default-features = false, features = ["async-io"] }
+async-io = "2"
+futures-util = "0.3"
+rustix = { version = "1", features = ["process", "fs", "pipe"] }
+greetd_ipc = { version = "0.10", features = ["sync-codec"] }
+notify = "8"
+roxmltree = "0.21"
+libc = "0.2"
 
 # Utilities
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
-tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
 fuzzy-matcher = "0.3"
+xdg = "2"
+insta = "1"
+tempfile = "3"
