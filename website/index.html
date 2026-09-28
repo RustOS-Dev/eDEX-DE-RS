@@ -13,7 +13,7 @@
         <div class="logo">
             <span class="logo-edex">eDEX</span><span class="logo-de">-DE</span>
         </div>
-        <p class="tagline">A sci-fi Wayland desktop environment — built in pure Rust</p>
+        <p class="tagline">A sci-fi desktop shell for Hyprland — Rust + wgpu</p>
         <div class="header-links">
             <a href="https://github.com/eDEX-OS/eDEX-DE" class="btn btn-primary">GitHub</a>
             <a href="https://github.com/eDEX-OS/eDEX-DE/releases/latest" class="btn btn-secondary">Latest Release</a>
@@ -28,17 +28,17 @@
                 <div class="feature-card">
                     <span class="feature-icon">🖥️</span>
                     <h3>Full Wayland Compositor</h3>
-                    <p>Built on smithay — DRM/KMS, libinput, XDG-shell. No Hyprland, no X11 required.</p>
+                    <p>Runs on Hyprland 0.55+: the shell draws on the layer shell and reserves space so your apps tile exactly into the terminal slot.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">🎨</span>
                     <h3>eDEX-UI Faithful Aesthetic</h3>
-                    <p>3-panel sci-fi layout, glowing cyan borders, animated hex keyboard. Tron, Matrix, and Amber themes.</p>
+                    <p>3-panel sci-fi layout, glowing borders, clickable hex keyboard. Twelve themes from Tron to Nord.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">💻</span>
                     <h3>Built-in Terminal</h3>
-                    <p>PTY-backed terminal emulator with multi-tab support, ANSI/VT100 rendering, and clipboard.</p>
+                    <p>Multi-tab terminal on alacritty_terminal: alt screen, mouse reporting, selection, scrollback, clipboard.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">📊</span>
@@ -48,22 +48,22 @@
                 <div class="feature-card">
                     <span class="feature-icon">🚀</span>
                     <h3>App Launcher</h3>
-                    <p>Alt+Space fuzzy app launcher scanning XDG .desktop files across all standard paths.</p>
+                    <p>SUPER+Space fuzzy launcher over XDG desktop entries with launch history.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">🪟</span>
                     <h3>Tiling Window Manager</h3>
-                    <p>Smart tiling: 0 apps → eDEX fullscreen; 1 app → fullscreen; 2+ → equal columns. No escape from eDEX.</p>
+                    <p>Hyprland tiles your windows inside the eDEX frame; panels, bars and keyboard stay visible around them.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">⚙️</span>
                     <h3>Settings Panel</h3>
-                    <p>14-category settings UI — appearance, display, input, audio, network, security, terminal, and more.</p>
+                    <p>14-category settings wired to real backends, a privacy panel for Tor, Tailscale and VPNs, a notification server and a greetd greeter.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">🔒</span>
                     <h3>Privacy Indicators</h3>
-                    <p>Live status bar indicators for Tailscale, WireGuard, Tor, fprintd, microphone, and camera.</p>
+                    <p>Live status for Tor, Tailscale, VPN, WireGuard, fprintd, microphone and camera; Tor and Tailscale are controlled from the shell.</p>
                 </div>
             </div>
         </section>
@@ -89,7 +89,7 @@
                 </div>
                 <div class="install-card">
                     <h3>From Source</h3>
-                    <pre><code>cargo build --release -p edex-de
+                    <pre><code>cargo build --release --locked --workspace --bins
 sudo install -Dm755 \
   target/release/edex-de \
   /usr/bin/edex-de</code></pre>
@@ -105,12 +105,15 @@ sudo install -Dm755 \
                     <tr><th>Shortcut</th><th>Action</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td><kbd>Alt+Space</kbd></td><td>App launcher</td></tr>
-                    <tr><td><kbd>Alt+Tab</kbd></td><td>Cycle window focus</td></tr>
-                    <tr><td><kbd>Super+Q</kbd></td><td>Close focused window</td></tr>
-                    <tr><td><kbd>Super+1–9</kbd></td><td>Switch workspace</td></tr>
-                    <tr><td><kbd>Super+,</kbd></td><td>Open settings</td></tr>
-                    <tr><td><kbd>Super+L</kbd></td><td>Lock screen</td></tr>
+                    <tr><td><kbd>Super+Space</kbd></td><td>App launcher</td></tr>
+                    <tr><td><kbd>Super+,</kbd></td><td>Settings</td></tr>
+                    <tr><td><kbd>Super+P</kbd></td><td>Privacy panel</td></tr>
+                    <tr><td><kbd>Super+N</kbd></td><td>Notifications</td></tr>
+                    <tr><td><kbd>Super+Esc</kbd></td><td>Power menu</td></tr>
+                    <tr><td><kbd>Super+Return</kbd></td><td>Focus the eDEX terminal</td></tr>
+                    <tr><td><kbd>Super+Q</kbd> / <kbd>Super+F</kbd></td><td>Close / fullscreen window</td></tr>
+                    <tr><td><kbd>Super+1–0</kbd></td><td>Switch workspace</td></tr>
+                    <tr><td><kbd>Super+L</kbd></td><td>Lock screen (hyprlock)</td></tr>
                 </tbody>
             </table>
         </section>
@@ -119,12 +122,13 @@ sudo install -Dm755 \
         <section id="stack">
             <h2 class="section-title">// TECH STACK</h2>
             <div class="stack-list">
-                <div class="stack-item"><span class="stack-name">smithay</span><span class="stack-desc">Wayland compositor (DRM/KMS, libinput, XDG-shell)</span></div>
+                <div class="stack-item"><span class="stack-name">Hyprland</span><span class="stack-desc">Window management; eDEX-DE draws on its layer shell (smithay-client-toolkit)</span></div>
                 <div class="stack-item"><span class="stack-name">wgpu</span><span class="stack-desc">GPU-accelerated rendering via Vulkan + WGSL shaders</span></div>
                 <div class="stack-item"><span class="stack-name">glyphon</span><span class="stack-desc">wgpu text rendering with cosmic-text layout</span></div>
-                <div class="stack-item"><span class="stack-name">portable-pty</span><span class="stack-desc">PTY management for the terminal emulator</span></div>
+                <div class="stack-item"><span class="stack-name">alacritty_terminal</span><span class="stack-desc">Terminal emulation and PTY handling</span></div>
                 <div class="stack-item"><span class="stack-name">sysinfo</span><span class="stack-desc">Cross-platform system statistics</span></div>
-                <div class="stack-item"><span class="stack-name">xkbcommon</span><span class="stack-desc">Keyboard layout and keysym handling</span></div>
+                <div class="stack-item"><span class="stack-name">zbus</span><span class="stack-desc">Notification server, logind, UPower and fprintd</span></div>
+                <div class="stack-item"><span class="stack-name">greetd + cage</span><span class="stack-desc">The eDEX login screen</span></div>
             </div>
         </section>
     </main>
