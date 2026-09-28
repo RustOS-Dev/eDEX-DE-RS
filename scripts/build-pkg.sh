@@ -8,7 +8,8 @@ cd "$ROOT/packaging/aur"
 rm -rf src pkg "edex-de-$V.tar.gz"
 git -C "$ROOT" archive --format=tar.gz --prefix="eDEX-DE-$V/" HEAD > "edex-de-$V.tar.gz"
 sed -e "s/^pkgver=.*/pkgver=$V/" -e "s|^source=.*|source=(\"edex-de-$V.tar.gz\")|" PKGBUILD > PKGBUILD.local
+# shellcheck disable=SC2046,SC2154
 sudo pacman -S --needed --noconfirm --asdeps $(source PKGBUILD.local; echo "${makedepends[@]}") >/dev/null
 makepkg -p PKGBUILD.local --syncdeps --noconfirm --skipchecksums -f
 rm -f PKGBUILD.local
-ls -1 ./*.pkg.tar.zst
+ls -1 "${PKGDEST:-.}"/*.pkg.tar.zst
