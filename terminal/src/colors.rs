@@ -38,6 +38,16 @@ fn bright(c: UiColor) -> UiColor {
 }
 
 impl Palette {
+    /// Build a palette from the shell theme.
+    pub fn from_theme(theme: &ui::Theme) -> Self {
+        Self {
+            fg: theme.terminal_fg,
+            bg: theme.terminal_bg,
+            cursor: theme.cursor,
+            ansi: theme.palette,
+        }
+    }
+
     /// Resolve a cell colour, honouring OSC overrides stored in the terminal's `Colors`.
     pub fn resolve(&self, color: Color, overrides: &Colors, bold: bool) -> UiColor {
         match color {

@@ -262,9 +262,9 @@ mod tests {
     #[test]
     fn keys_do_not_overlap() {
         let panel = Rect::new(0.0, 0.0, 1920.0, 220.0);
-        for r in 0..KEYBOARD_ROWS {
+        for (r, row) in ROWS.iter().enumerate() {
             let mut last_right = -1.0;
-            for c in 0..ROWS[r].len() {
+            for c in 0..row.len() {
                 let rect = key_rect(panel, 32.0, r, c);
                 assert!(rect.x >= last_right, "row {r} col {c}");
                 last_right = rect.right();
