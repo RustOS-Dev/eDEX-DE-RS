@@ -43,7 +43,7 @@ install -Dm644 packaging/greetd/config.toml %{buildroot}%{_datadir}/edex-de/gree
 install -Dm644 share/skel/hyprland.lua %{buildroot}%{_sysconfdir}/skel/.config/hypr/hyprland.lua
 install -dm755 %{buildroot}%{_datadir}/edex-de/themes %{buildroot}%{_datadir}/edex-de/hypr %{buildroot}%{_datadir}/edex-de/backgrounds
 install -m644 themes/*.toml %{buildroot}%{_datadir}/edex-de/themes/
-install -m644 share/hypr/* %{buildroot}%{_datadir}/edex-de/hypr/
+cp -r share/hypr/. %{buildroot}%{_datadir}/edex-de/hypr/
 install -m644 assets/generated/backgrounds/*.png %{buildroot}%{_datadir}/edex-de/backgrounds/
 for s in 32 48 64 128 256 512; do
   install -Dm644 assets/generated/icons/edex-de-$s.png %{buildroot}%{_datadir}/icons/hicolor/${s}x${s}/apps/edex-de.png

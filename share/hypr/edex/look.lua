@@ -20,7 +20,7 @@ hl.config({
         blur = { enabled = false },
     },
     animations = { enabled = true },
-    dwindle = { preserve_split = true, pseudotile = true },
+    dwindle = { preserve_split = true },
     master = { new_status = "master" },
     misc = {
         disable_hyprland_logo = true,
@@ -28,7 +28,6 @@ hl.config({
         force_default_wallpaper = 0,
         background_color = 0x0a0e1a,
         focus_on_activate = true,
-        new_window_takes_over_fullscreen = 2,
         middle_click_paste = true,
         key_press_enables_dpms = true,
         mouse_move_enables_dpms = true,

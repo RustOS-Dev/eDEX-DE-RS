@@ -25,7 +25,7 @@ override_dh_auto_install:
 	install -Dm644 share/skel/hyprland.lua debian/edex-de/etc/skel/.config/hypr/hyprland.lua
 	install -dm755 debian/edex-de/usr/share/edex-de/themes debian/edex-de/usr/share/edex-de/hypr debian/edex-de/usr/share/edex-de/backgrounds
 	install -m644 themes/*.toml debian/edex-de/usr/share/edex-de/themes/
-	install -m644 share/hypr/* debian/edex-de/usr/share/edex-de/hypr/
+	cp -r share/hypr/. debian/edex-de/usr/share/edex-de/hypr/
 	install -m644 assets/generated/backgrounds/*.png debian/edex-de/usr/share/edex-de/backgrounds/
 	for s in 32 48 64 128 256 512; do install -Dm644 assets/generated/icons/edex-de-$$s.png debian/edex-de/usr/share/icons/hicolor/$${s}x$${s}/apps/edex-de.png; done
 	install -Dm644 assets/logo.svg debian/edex-de/usr/share/icons/hicolor/scalable/apps/edex-de.svg

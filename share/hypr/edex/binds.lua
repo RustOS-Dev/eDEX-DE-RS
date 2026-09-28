@@ -64,7 +64,7 @@ hl.bind(mod .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
 -- Session
 hl.bind(mod .. " + SHIFT + L", hl.dsp.exec_cmd("loginctl lock-session"))
-hl.bind(mod .. " + SHIFT + R", hl.dsp.reload_config())
+hl.bind(mod .. " + SHIFT + R", hl.dsp.exec_cmd("hyprctl reload && edex-de ipc reload"))
 
 -- Screenshots (grim + slurp → clipboard and ~/Pictures/Screenshots)
 local shot_dir = os.getenv("HOME") .. "/Pictures/Screenshots"

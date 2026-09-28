@@ -77,9 +77,9 @@ cargo run -p edex-greeter -- --demo                              # greeter witho
 ```
 greetd (tty1) → cage -s -- edex-greeter → edex-session → start-hyprland
    Hyprland reads ~/.config/hypr/hyprland.lua
-      → require /usr/share/edex-de/hypr/hyprland.lua   (env, monitors, look, input, rules, binds, autostart)
-      → pcall  ~/.config/edex-de/hypr/generated.lua    (written by the settings panel)
-      → pcall  ~/.config/hypr/user.lua                 (yours)
+      → require("edex") → /usr/share/edex-de/hypr/edex/*.lua (env, monitors, look, input, rules, binds, autostart)
+      → dofile ~/.config/edex-de/hypr/generated.lua   (written by the settings panel)
+      → dofile ~/.config/hypr/user.lua                (yours)
    hyprland.start → portals, hyprpolkitagent, hypridle, cliphist, systemctl --user start edex-de.service
 ```
 
@@ -87,7 +87,7 @@ greetd (tty1) → cage -s -- edex-greeter → edex-session → start-hyprland
 
 ## Keyboard shortcuts
 
-Hyprland binds (from `share/hypr/binds.lua`, editable in `~/.config/hypr/user.lua`):
+Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/user.lua`):
 
 | Keys | Action |
 |---|---|

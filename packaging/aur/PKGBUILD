@@ -82,7 +82,7 @@ package() {
     install -dm755 "$pkgdir/usr/share/edex-de/themes" "$pkgdir/usr/share/edex-de/hypr" \
         "$pkgdir/usr/share/edex-de/backgrounds" "$pkgdir/usr/share/edex-de/skel"
     install -m644 themes/*.toml "$pkgdir/usr/share/edex-de/themes/"
-    install -m644 share/hypr/* "$pkgdir/usr/share/edex-de/hypr/"
+    cp -r share/hypr/. "$pkgdir/usr/share/edex-de/hypr/"
     install -m644 share/skel/hyprland.lua "$pkgdir/usr/share/edex-de/skel/hyprland.lua"
     install -m644 assets/generated/backgrounds/*.png "$pkgdir/usr/share/edex-de/backgrounds/"
     for s in 32 48 64 128 256 512; do
