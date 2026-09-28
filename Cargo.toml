@@ -49,7 +49,7 @@ unicode-width = "0.2"
 
 # System
 sysinfo = "0.39"
-zbus = { version = "5", default-features = false, features = ["async-io"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 async-io = "2"
 futures-util = "0.3"
 rustix = { version = "1", features = ["process", "fs", "pipe"] }

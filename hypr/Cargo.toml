@@ -8,6 +8,7 @@ repository.workspace = true
 description = "eDEX-DE hypr crate"
 
 [dependencies]
+ui = { path = "../ui" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=eDEX-DE
-Comment=eDEX Desktop Environment — a sci-fi Wayland compositor
-Exec=/usr/lib/edex-de/edex-de-startup.sh
-TryExec=/usr/bin/edex-de
+Comment=Sci-fi desktop shell on Hyprland
+Exec=edex-session
+TryExec=edex-de
 Type=Application
-DesktopNames=eDEX-DE
+DesktopNames=eDEX-DE;Hyprland

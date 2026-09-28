@@ -1,0 +1,24 @@
+#!/bin/sh
+# eDEX-DE session launcher: runs Hyprland with the eDEX configuration.
+# Logs go to $XDG_STATE_HOME/edex-de/session.log; the shell itself logs to the user journal.
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/edex-de"
+mkdir -p "$STATE_HOME"
+exec >>"$STATE_HOME/session.log" 2>&1
+echo "== eDEX-DE session $(date -Is) uid=$(id -u) tty=$(tty 2>/dev/null || echo none)"
+
+export XDG_CURRENT_DESKTOP="eDEX-DE:Hyprland"
+export XDG_SESSION_DESKTOP="edex-de"
+export XDG_SESSION_TYPE="wayland"
+
+# First login: give the user the eDEX Hyprland entry point if they have none.
+CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+if [ ! -e "$CONFIG_HOME/hypr/hyprland.lua" ] && [ ! -e "$CONFIG_HOME/hypr/hyprland.conf" ]; then
+    mkdir -p "$CONFIG_HOME/hypr"
+    cp /usr/share/edex-de/skel/hyprland.lua "$CONFIG_HOME/hypr/hyprland.lua"
+    echo "installed default ~/.config/hypr/hyprland.lua"
+fi
+
+if command -v start-hyprland >/dev/null 2>&1; then
+    exec start-hyprland "$@"
+fi
+exec Hyprland "$@"

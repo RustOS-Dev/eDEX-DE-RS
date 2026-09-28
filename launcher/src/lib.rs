@@ -1,12 +1,11 @@
-//! eDEX-DE app launcher.
-//!
-//! Scans XDG .desktop files, fuzzy-searches apps, launches via exec.
-//! Triggered by Alt+Space overlay rendered by the wgpu renderer.
+//! Application launcher: XDG desktop entry scanning, fuzzy search, detached launching.
 
 pub mod desktop;
+pub mod history;
 pub mod runner;
 pub mod search;
 
 pub use desktop::{scan_applications, AppEntry};
-pub use runner::launch_app;
+pub use history::LaunchHistory;
+pub use runner::{launch, LaunchOptions};
 pub use search::AppSearch;
