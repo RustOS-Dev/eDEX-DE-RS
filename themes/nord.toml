@@ -1,0 +1,25 @@
+# eDEX-DE theme: Nord — arctic, bluish palette.
+name = "nord"
+background = "#2e3440"
+panel_bg = "#3b4252"
+border = "#88c0d0"
+text_primary = "#eceff4"
+text_secondary = "#a3adc2"
+accent = "#a3be8c"
+warning = "#ebcb8b"
+error = "#bf616a"
+cursor = "#88c0d0"
+selection = "#88c0d055"
+glow = 0.3
+
+[terminal]
+fg = "#eceff4"
+bg = "#2e3440"
+palette = [
+  "#3b4252", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#88c0d0", "#e5e9f0", "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#81a1c1", "#b48ead", "#8fbcbb", "#eceff4",
+]
+
+[keyboard]
+key = "#434c5e"
+key_active = "#88c0d0d8"
+key_border = "#88c0d099"

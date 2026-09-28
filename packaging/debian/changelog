@@ -1,0 +1,6 @@
+edex-de (3.0.0-1) unstable; urgency=medium
+
+  * Rewrite as a Rust shell on Hyprland's layer shell; add greetd greeter,
+    settings and privacy panels, notification server, IPC.
+
+ -- eDEX-OS <edex-de@github.com>  Mon, 28 Sep 2026 12:00:00 +0000

@@ -2,102 +2,90 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, "claude/**"]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
 
 jobs:
   check:
-    name: cargo check
-    runs-on: ubuntu-latest
+    name: check · clippy · fmt
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-
-      - name: Install system dependencies
+      - name: System dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y \
-            libdrm-dev \
-            libgbm-dev \
-            libegl-dev \
-            libgles2-mesa-dev \
-            libinput-dev \
-            libseat-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libvulkan-dev \
-            vulkan-validationlayers \
-            libsystemd-dev \
-            libudev-dev \
-            libpixman-1-dev \
-            libx11-dev \
-            libxcb1-dev
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      - name: cargo check
-        run: cargo check --workspace
-
-      - name: cargo clippy
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: cargo fmt check
-        run: cargo fmt --all -- --check
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --locked --all-targets
+      - run: cargo clippy --workspace --locked --all-targets -- -D warnings
 
   test:
     name: cargo test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y \
-            libdrm-dev \
-            libgbm-dev \
-            libegl-dev \
-            libgles2-mesa-dev \
-            libinput-dev \
-            libseat-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libvulkan-dev \
-            libsystemd-dev \
-            libudev-dev \
-            libpixman-1-dev \
-            libx11-dev \
-            libxcb1-dev
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config dbus libnotify-bin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+  smoke-sway:
+    name: headless smoke test (sway + llvmpipe)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config \
+            sway foot grim mesa-vulkan-drivers dbus libnotify-bin fonts-jetbrains-mono python3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked --bins
+      - name: Shell smoke test
+        run: scripts/smoke-sway.sh target/debug/edex-de target/smoke
+      - name: Greeter smoke test
+        run: scripts/smoke-greeter.sh target/debug/edex-greeter target/smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
+          name: smoke-screenshots
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-test-
+            target/smoke/*.png
+            target/smoke/*.json
+            target/smoke/*.log
 
-      - name: cargo test
-        run: cargo test --workspace
+  pkgbuild:
+    name: makepkg (Arch container)
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:latest
+      options: --privileged
+    steps:
+      - name: Prepare container
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git sudo namcap
+          useradd -m builder && echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+      - uses: actions/checkout@v4
+      - name: Build package from the checked-out tree
+        run: |
+          chown -R builder .
+          sudo -u builder scripts/build-pkg.sh
+      - name: namcap
+        run: namcap packaging/aur/*.pkg.tar.zst || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: packaging/aur/*.pkg.tar.zst

@@ -1,0 +1,25 @@
+# eDEX-DE theme: Interstellar — deep space blue.
+name = "interstellar"
+background = "#020714"
+panel_bg = "#061024"
+border = "#3d8bff"
+text_primary = "#d6e4ff"
+text_secondary = "#7f9ccc"
+accent = "#8affff"
+warning = "#ffc861"
+error = "#ff5c7a"
+cursor = "#3d8bff"
+selection = "#3d8bff55"
+glow = 0.8
+
+[terminal]
+fg = "#d6e4ff"
+bg = "#020714"
+palette = [
+  "#020714", "#ff5c7a", "#5cf2a8", "#ffc861", "#3d8bff", "#b48cff", "#8affff", "#d6e4ff", "#2c3d66", "#ff8ea3", "#98ffcf", "#ffdc9a", "#7fb1ff", "#d0b8ff", "#c2ffff", "#ffffff",
+]
+
+[keyboard]
+key = "#0a1a3a"
+key_active = "#3d8bffd8"
+key_border = "#3d8bff99"

@@ -1,0 +1,9 @@
+# /etc/edex-greeter/greeter.toml — every key is optional.
+theme = "tron"
+# background = "/usr/share/edex-de/backgrounds/hexgrid-1080p.png"
+default_session = "edex-de"
+show_users = true
+power_buttons = true
+font_size = 15.0
+min_uid = 1000
+state_file = "/var/cache/edex-greeter/state.toml"

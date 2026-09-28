@@ -1,0 +1,25 @@
+# eDEX-DE theme: Navy — muted naval blue and brass.
+name = "navy"
+background = "#0a1220"
+panel_bg = "#0f1a2e"
+border = "#5fa8d3"
+text_primary = "#dbe9f4"
+text_secondary = "#8faabf"
+accent = "#e0b45c"
+warning = "#e0b45c"
+error = "#e05c5c"
+cursor = "#5fa8d3"
+selection = "#5fa8d355"
+glow = 0.5
+
+[terminal]
+fg = "#dbe9f4"
+bg = "#0a1220"
+palette = [
+  "#0a1220", "#e05c5c", "#6cc98a", "#e0b45c", "#5fa8d3", "#a97fd6", "#62c7c7", "#dbe9f4", "#3a4d63", "#f08b8b", "#95dfae", "#f0cf8f", "#8fc8e8", "#c9a9ea", "#95dede", "#ffffff",
+]
+
+[keyboard]
+key = "#122238"
+key_active = "#5fa8d3d8"
+key_border = "#5fa8d399"

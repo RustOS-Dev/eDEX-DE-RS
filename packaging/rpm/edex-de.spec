@@ -1,57 +1,71 @@
 Name:           edex-de
-Version:        1.0.0
+Version:        3.0.0
 Release:        1%{?dist}
-Summary:        eDEX-DE — A sci-fi Wayland desktop environment
-License:        GPL-3.0
+Summary:        eDEX-DE - sci-fi desktop shell for Hyprland
+License:        GPL-3.0-only
 URL:            https://github.com/eDEX-OS/eDEX-DE
 Source0:        https://github.com/eDEX-OS/eDEX-DE/archive/refs/tags/v%{version}.tar.gz
 
-BuildRequires:  rust cargo pkg-config
-BuildRequires:  libxkbcommon-devel libinput-devel libseat-devel
-BuildRequires:  libdrm-devel mesa-libgbm-devel wayland-devel
-BuildRequires:  vulkan-headers pixman-devel systemd-devel
-
-Requires:       libxkbcommon libinput libseat libdrm mesa-libgbm
-Requires:       wayland-libs vulkan-loader systemd-libs dbus
-Recommends:     xdg-desktop-portal
+BuildRequires:  rust >= 1.95 cargo pkgconfig librsvg2-tools
+BuildRequires:  libxkbcommon-devel wayland-devel vulkan-headers dbus-devel
+Requires:       hyprland >= 0.55 cage greetd libxkbcommon wayland-libs vulkan-loader dbus polkit
+Requires:       xdg-desktop-portal-gtk pipewire wireplumber NetworkManager bluez upower brightnessctl
+Requires:       jetbrains-mono-fonts kitty wl-clipboard grim slurp playerctl libnotify
+Recommends:     hyprlock hypridle cliphist
 
 %description
-A Wayland compositor and desktop environment inspired by eDEX-UI.
-Built in pure Rust using smithay and wgpu. Features a sci-fi terminal
-interface, tiling window management, app launcher, and system dashboard.
+A Rust + wgpu shell drawn on Hyprland's layer shell in the style of eDEX-UI:
+terminal, file browser, system dashboard, on-screen keyboard, launcher,
+settings, privacy panel, notification server and a greetd greeter.
+The RPM is built by CI; eDEX-DE is developed and tested on Arch/CachyOS.
 
 %prep
 %autosetup -n eDEX-DE-%{version}
 
 %build
-cargo build --release --locked -p edex-de
+cargo build --release --locked --workspace --bins
+assets/make-assets.sh assets/generated
+
+%check
+cargo test --release --locked --workspace
 
 %install
-install -Dm755 target/release/edex-de \
-    %{buildroot}%{_bindir}/edex-de
-
-install -Dm644 packaging/session/edex-de.desktop \
-    %{buildroot}%{_datadir}/wayland-sessions/edex-de.desktop
-
-install -Dm755 packaging/session/edex-de-startup.sh \
-    %{buildroot}%{_libdir}/edex-de/edex-de-startup.sh
-
-install -Dm644 packaging/session/edex-de-portals.conf \
-    %{buildroot}%{_datadir}/xdg-desktop-portal/edex-de-portals.conf
-
-install -dm755 %{buildroot}%{_datadir}/edex-de/themes
-install -Dm644 themes/*.toml \
-    %{buildroot}%{_datadir}/edex-de/themes/
+install -Dm755 target/release/edex-de %{buildroot}%{_bindir}/edex-de
+install -Dm755 target/release/edex-greeter %{buildroot}%{_bindir}/edex-greeter
+install -Dm755 packaging/session/edex-session %{buildroot}%{_bindir}/edex-session
+install -Dm644 packaging/session/edex-de.desktop %{buildroot}%{_datadir}/wayland-sessions/edex-de.desktop
+install -Dm644 packaging/session/edex-de-portals.conf %{buildroot}%{_datadir}/xdg-desktop-portal/edex-de-portals.conf
+install -Dm644 packaging/systemd/edex-de.service %{buildroot}%{_userunitdir}/edex-de.service
+install -Dm644 packaging/tmpfiles/edex-greeter.conf %{buildroot}%{_tmpfilesdir}/edex-greeter.conf
+install -Dm644 packaging/polkit/50-edex-greeter-power.rules %{buildroot}%{_datadir}/polkit-1/rules.d/50-edex-greeter-power.rules
+install -Dm644 packaging/greeter/greeter.toml %{buildroot}%{_sysconfdir}/edex-greeter/greeter.toml
+install -Dm644 packaging/greetd/config.toml %{buildroot}%{_datadir}/edex-de/greetd/config.toml
+install -Dm644 share/skel/hyprland.lua %{buildroot}%{_sysconfdir}/skel/.config/hypr/hyprland.lua
+install -dm755 %{buildroot}%{_datadir}/edex-de/themes %{buildroot}%{_datadir}/edex-de/hypr %{buildroot}%{_datadir}/edex-de/backgrounds
+install -m644 themes/*.toml %{buildroot}%{_datadir}/edex-de/themes/
+install -m644 share/hypr/* %{buildroot}%{_datadir}/edex-de/hypr/
+install -m644 assets/generated/backgrounds/*.png %{buildroot}%{_datadir}/edex-de/backgrounds/
+for s in 32 48 64 128 256 512; do
+  install -Dm644 assets/generated/icons/edex-de-$s.png %{buildroot}%{_datadir}/icons/hicolor/${s}x${s}/apps/edex-de.png
+done
+install -Dm644 assets/logo.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/edex-de.svg
 
 %files
 %license LICENSE
-%doc README.md
+%doc README.md docs/architecture.md docs/ipc.md
 %{_bindir}/edex-de
+%{_bindir}/edex-greeter
+%{_bindir}/edex-session
 %{_datadir}/wayland-sessions/edex-de.desktop
-%{_libdir}/edex-de/edex-de-startup.sh
 %{_datadir}/xdg-desktop-portal/edex-de-portals.conf
-%{_datadir}/edex-de/themes/
+%{_userunitdir}/edex-de.service
+%{_tmpfilesdir}/edex-greeter.conf
+%{_datadir}/polkit-1/rules.d/50-edex-greeter-power.rules
+%config(noreplace) %{_sysconfdir}/edex-greeter/greeter.toml
+%{_sysconfdir}/skel/.config/hypr/hyprland.lua
+%{_datadir}/edex-de/
+%{_datadir}/icons/hicolor/*/apps/edex-de.*
 
 %changelog
-* Mon May 19 2026 eDEX-OS <edex-de@github.com> - 1.0.0-1
-- Initial RPM release
+* Mon Sep 28 2026 eDEX-OS <edex-de@github.com> - 3.0.0-1
+- Rewrite as a Rust shell on Hyprland; greetd greeter; settings and privacy panels

@@ -1,0 +1,8 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: edex-de
+Source: https://github.com/eDEX-OS/eDEX-DE
+
+Files: *
+Copyright: 2024-2026 eDEX-OS contributors
+License: GPL-3.0-only
+ See /usr/share/common-licenses/GPL-3.

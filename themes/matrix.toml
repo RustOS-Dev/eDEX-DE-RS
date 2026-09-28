@@ -1,7 +1,25 @@
+# eDEX-DE theme: Matrix — phosphor green on black.
 name = "matrix"
 background = "#000a00"
 panel_bg = "#001500"
 border = "#00ff41"
-text_primary = "#00ff41"
+text_primary = "#9dffb0"
 text_secondary = "#00aa2a"
 accent = "#80ff80"
+warning = "#ffd23f"
+error = "#ff5555"
+cursor = "#00ff41"
+selection = "#00ff4155"
+glow = 0.8
+
+[terminal]
+fg = "#9dffb0"
+bg = "#000a00"
+palette = [
+  "#000a00", "#ff5555", "#00ff41", "#ffd23f", "#3399ff", "#cc66ff", "#33ffcc", "#9dffb0", "#1f5f2f", "#ff8080", "#66ff80", "#ffe680", "#80c0ff", "#e0a0ff", "#99ffe0", "#ffffff",
+]
+
+[keyboard]
+key = "#001a05"
+key_active = "#00ff41d8"
+key_border = "#00ff4199"

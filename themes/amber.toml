@@ -1,7 +1,25 @@
+# eDEX-DE theme: Amber — monochrome amber terminal.
 name = "amber"
-background = "#0a0500"
-panel_bg = "#120a00"
-border = "#ff9900"
-text_primary = "#ffcc66"
-text_secondary = "#cc8800"
-accent = "#ffee00"
+background = "#100b00"
+panel_bg = "#1a1200"
+border = "#ffb000"
+text_primary = "#ffd680"
+text_secondary = "#c48a00"
+accent = "#ffe08a"
+warning = "#ff7a00"
+error = "#ff4444"
+cursor = "#ffb000"
+selection = "#ffb00055"
+glow = 0.8
+
+[terminal]
+fg = "#ffd680"
+bg = "#100b00"
+palette = [
+  "#100b00", "#ff5c33", "#c9c000", "#ffb000", "#d19a00", "#ff9b3d", "#ffc766", "#ffd680", "#6e4d00", "#ff8a66", "#e6d84d", "#ffd24d", "#ffbf4d", "#ffb37a", "#ffe2a3", "#fff5d6",
+]
+
+[keyboard]
+key = "#1f1500"
+key_active = "#ffb000d8"
+key_border = "#ffb00099"

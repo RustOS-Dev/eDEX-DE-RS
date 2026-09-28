@@ -2,300 +2,98 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*"]
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: edex-de
 
 jobs:
-  build-linux:
-    name: Build (${{ matrix.target }})
-    runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            suffix: ""
+  ci:
+    uses: ./.github/workflows/ci.yml
 
+  release:
+    needs: ci
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Install system dependencies
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y \
-            libdrm-dev \
-            libgbm-dev \
-            libegl-dev \
-            libgles2-mesa-dev \
-            libinput-dev \
-            libseat-dev \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libvulkan-dev \
-            vulkan-validationlayers \
-            libsystemd-dev \
-            libudev-dev \
-            libpixman-1-dev \
-            libx11-dev \
-            libxcb1-dev \
-            dpkg-dev \
-            rpm \
-            fakeroot
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config \
+            librsvg2-bin dpkg-dev debhelper rpm fakeroot
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: |
+          cargo build --release --locked --workspace --bins
+          assets/make-assets.sh assets/generated
+      - name: Tarball
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          mkdir -p dist/edex-de-$V
+          cp target/release/edex-de target/release/edex-greeter packaging/session/edex-session dist/edex-de-$V/
+          cp -r themes share packaging assets/generated dist/edex-de-$V/
+          cp README.md LICENSE CHANGELOG.md dist/edex-de-$V/
+          tar -C dist -czf dist/edex-de-$V-x86_64-linux.tar.gz edex-de-$V
+      - name: Debian package
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          rm -rf build-deb && mkdir build-deb
+          git archive --format=tar --prefix=edex-de-$V/ HEAD | tar -x -C build-deb
+          cp -r packaging/debian build-deb/edex-de-$V/debian
+          cd build-deb/edex-de-$V
+          dpkg-buildpackage -us -uc -b
+          cp ../*.deb ../../dist/
+      - name: RPM package
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          mkdir -p ~/rpmbuild/{SOURCES,SPECS}
+          git archive --format=tar.gz --prefix=eDEX-DE-$V/ HEAD > ~/rpmbuild/SOURCES/v$V.tar.gz
+          sed "s/^Version:.*/Version:        $V/" packaging/rpm/edex-de.spec > ~/rpmbuild/SPECS/edex-de.spec
+          rpmbuild -bb --nodeps ~/rpmbuild/SPECS/edex-de.spec
+          cp ~/rpmbuild/RPMS/x86_64/*.rpm dist/
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz *.deb *.rpm > SHA256SUMS
+      - name: Release notes
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          awk -v v="$V" 'BEGIN{p=0} /^## /{p = index($0, v) > 0} p' CHANGELOG.md > dist/notes.md
+          [ -s dist/notes.md ] || echo "eDEX-DE $V" > dist/notes.md
+      - uses: softprops/action-gh-release@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: ${{ runner.os }}-release-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-release-
-
-      - name: Build release binary
-        run: |
-          cargo build --release --target ${{ matrix.target }} -p edex-de
-
-      - name: Strip binary
-        run: strip target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Package .deb
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          VERSION_NO_V="${VERSION#v}"
-          PKG="edex-de_${VERSION_NO_V}_amd64"
-          mkdir -p "${PKG}/DEBIAN"
-          mkdir -p "${PKG}/usr/bin"
-          mkdir -p "${PKG}/usr/share/wayland-sessions"
-          mkdir -p "${PKG}/usr/lib/edex-de"
-          mkdir -p "${PKG}/usr/share/xdg-desktop-portal"
-          mkdir -p "${PKG}/usr/share/edex-de/themes"
-          mkdir -p "${PKG}/usr/share/doc/edex-de"
-          mkdir -p "${PKG}/usr/share/licenses/edex-de"
-
-          install -Dm755 target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} \
-            "${PKG}/usr/bin/edex-de"
-
-          install -Dm644 packaging/session/edex-de.desktop \
-            "${PKG}/usr/share/wayland-sessions/edex-de.desktop"
-
-          install -Dm755 packaging/session/edex-de-startup.sh \
-            "${PKG}/usr/lib/edex-de/edex-de-startup.sh"
-
-          install -Dm644 packaging/session/edex-de-portals.conf \
-            "${PKG}/usr/share/xdg-desktop-portal/edex-de-portals.conf"
-
-          install -Dm644 themes/*.toml \
-            "${PKG}/usr/share/edex-de/themes/"
-
-          install -Dm644 README.md "${PKG}/usr/share/doc/edex-de/README.md"
-          install -Dm644 LICENSE "${PKG}/usr/share/licenses/edex-de/LICENSE"
-
-          cat > "${PKG}/DEBIAN/control" << CONTROL
-          Package: edex-de
-          Version: ${VERSION_NO_V}
-          Architecture: amd64
-          Maintainer: eDEX-OS <edex-de@github.com>
-          Description: eDEX-DE — A sci-fi Wayland desktop environment
-           A Wayland compositor and desktop environment inspired by eDEX-UI.
-           Built in pure Rust using smithay and wgpu.
-          Depends: libdrm2, libgbm1, libinput10, libwayland-server0, libxkbcommon0, libvulkan1, libudev1, dbus
-          Recommends: xdg-desktop-portal
-          Section: x11
-          Priority: optional
-          CONTROL
-
-          dpkg-deb --build --root-owner-group "${PKG}"
-          mv "${PKG}.deb" "edex-de-${VERSION_NO_V}-amd64.deb"
-
-      - name: Package .rpm
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          VERSION_NO_V="${VERSION#v}"
-          # RPM does not allow '-' in Version; replace with '~' (pre-release convention)
-          RPM_VERSION="${VERSION_NO_V//-/~}"
-          mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          install -Dm755 target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} \
-            rpmbuild/BUILD/edex-de
-
-          cat > rpmbuild/SPECS/edex-de.spec << SPEC
-          Name:           edex-de
-          Version:        ${RPM_VERSION}
-          Release:        1%{?dist}
-          Summary:        eDEX-DE — A sci-fi Wayland desktop environment
-          License:        GPL-3.0
-          URL:            https://github.com/eDEX-OS/eDEX-DE
-
-          %description
-          A Wayland compositor and desktop environment inspired by eDEX-UI.
-          Built in pure Rust using smithay and wgpu.
-
-          Requires: libdrm, mesa-libgbm, libinput, libwayland-server, libxkbcommon, vulkan-loader
-
-          %install
-          mkdir -p %{buildroot}/usr/bin
-          install -m755 %{_builddir}/edex-de %{buildroot}/usr/bin/edex-de
-
-          %files
-          /usr/bin/edex-de
-
-          %changelog
-          * $(date "+%a %b %d %Y") eDEX-OS <edex-de@github.com> - ${VERSION_NO_V}-1
-          - Release ${VERSION}
-          SPEC
-
-          rpmbuild --define "_topdir $(pwd)/rpmbuild" \
-            --define "_builddir $(pwd)/rpmbuild/BUILD" \
-            -bb rpmbuild/SPECS/edex-de.spec
-          find rpmbuild/RPMS -name "*.rpm" -exec mv {} "edex-de-${VERSION_NO_V}.x86_64.rpm" \;
-
-
-      - name: Package tarball
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          VERSION_NO_V="${VERSION#v}"
-          mkdir -p "edex-de-${VERSION_NO_V}"
-          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} \
-            "edex-de-${VERSION_NO_V}/"
-          cp README.md LICENSE "edex-de-${VERSION_NO_V}/"
-          if [ -d packaging ]; then cp -r packaging "edex-de-${VERSION_NO_V}/"; fi
-          if [ -d themes ]; then cp -r themes "edex-de-${VERSION_NO_V}/"; fi
-          tar -czf "edex-de-${VERSION_NO_V}-x86_64-linux.tar.gz" \
-            "edex-de-${VERSION_NO_V}/"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: packages-${{ matrix.target }}
-          path: |
-            edex-de-*.deb
-            edex-de-*.rpm
-            edex-de-*.tar.gz
-
-  publish:
-    name: Publish GitHub Release
-    needs: build-linux
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: packages-*
-          merge-multiple: true
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-      - name: Generate release notes
-        id: notes
-        run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          cat << EOF > release_notes.md
-          ## eDEX-DE ${VERSION}
-
-          ### Installation
-
-          **Arch Linux (AUR):**
-          \`\`\`bash
-          yay -S edex-de
-          \`\`\`
-
-          **Debian/Ubuntu (.deb):**
-          \`\`\`bash
-          sudo dpkg -i edex-de-*-amd64.deb
-          \`\`\`
-
-          **Fedora/RHEL (.rpm):**
-          \`\`\`bash
-          sudo rpm -i edex-de-*.x86_64.rpm
-          \`\`\`
-
-          **From tarball:**
-          \`\`\`bash
-          tar -xzf edex-de-*-x86_64-linux.tar.gz
-          sudo install -Dm755 edex-de-*/edex-de /usr/bin/edex-de
-          \`\`\`
-
-          ### Full Changelog
-          https://github.com/eDEX-OS/eDEX-DE/commits/${VERSION}
-          EOF
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          name: "eDEX-DE ${{ steps.version.outputs.VERSION }}"
-          body_path: release_notes.md
-          draft: false
-          prerelease: ${{ contains(steps.version.outputs.VERSION, '-beta') || contains(steps.version.outputs.VERSION, '-rc') || contains(steps.version.outputs.VERSION, '-alpha') }}
+          body_path: dist/notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            edex-de-*.deb
-            edex-de-*.rpm
-            edex-de-*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/SHA256SUMS
 
-  aur-publish:
-    name: Publish to AUR
-    needs: publish
-    runs-on: ubuntu-latest
-    # Only publish stable releases to AUR (skip -beta, -rc, -alpha)
-    if: ${{ !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-alpha') }}
-
+  aur:
+    needs: release
+    runs-on: ubuntu-24.04
+    if: ${{ !contains(github.ref_name, '-') }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Get version
-        id: version
+      - name: PKGBUILD with real checksum
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
-          VERSION_NO_V="${VERSION#v}"
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-          echo "VERSION_NO_V=${VERSION_NO_V}" >> $GITHUB_OUTPUT
-
-      - name: Compute sha256sum of source tarball
-        id: sha256
-        run: |
-          VERSION_NO_V="${{ steps.version.outputs.VERSION_NO_V }}"
-          URL="https://github.com/eDEX-OS/eDEX-DE/archive/refs/tags/v${VERSION_NO_V}.tar.gz"
-          SHA=$(curl -sL "$URL" | sha256sum | awk '{print $1}')
-          echo "SHA256=${SHA}" >> $GITHUB_OUTPUT
-
-      - name: Update PKGBUILD
-        run: |
-          VERSION_NO_V="${{ steps.version.outputs.VERSION_NO_V }}"
-          SHA256="${{ steps.sha256.outputs.SHA256 }}"
-          sed -i "s/^pkgver=.*/pkgver=${VERSION_NO_V}/" packaging/aur/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
-          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" packaging/aur/PKGBUILD
-
+          V=${GITHUB_REF_NAME#v}
+          curl -sL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$V.tar.gz" -o src.tar.gz
+          SUM=$(sha256sum src.tar.gz | cut -d' ' -f1)
+          sed -e "s/^pkgver=.*/pkgver=$V/" -e "s/^sha256sums=.*/sha256sums=('$SUM')/" packaging/aur/PKGBUILD > PKGBUILD
+          cat PKGBUILD
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         with:
           pkgname: edex-de
-          pkgbuild: packaging/aur/PKGBUILD
+          pkgbuild: ./PKGBUILD
           commit_username: eDEX-OS
           commit_email: edex-de@github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ steps.version.outputs.VERSION }}"
-          ssh_keyscan_types: rsa,ecdsa,ed25519
-          force_push: true
-          assets: packaging/aur/edex-de.install
+          commit_message: "Update to ${{ github.ref_name }}"

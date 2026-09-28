@@ -1,0 +1,25 @@
+# eDEX-DE theme: Cyborg — steel blue with red accents.
+name = "cyborg"
+background = "#0b0c10"
+panel_bg = "#12151b"
+border = "#66fcf1"
+text_primary = "#c5c6c7"
+text_secondary = "#8a9aa5"
+accent = "#ff2e63"
+warning = "#f9a03f"
+error = "#ff2e63"
+cursor = "#66fcf1"
+selection = "#66fcf155"
+glow = 0.8
+
+[terminal]
+fg = "#c5c6c7"
+bg = "#0b0c10"
+palette = [
+  "#0b0c10", "#ff2e63", "#45a29e", "#f9a03f", "#4f8fd6", "#c56cf0", "#66fcf1", "#c5c6c7", "#3d444d", "#ff6b8f", "#6ad4cf", "#ffc07a", "#7fb0ff", "#dca2ff", "#a0fff8", "#ffffff",
+]
+
+[keyboard]
+key = "#151a22"
+key_active = "#66fcf1d8"
+key_border = "#66fcf199"

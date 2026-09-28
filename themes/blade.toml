@@ -1,0 +1,25 @@
+# eDEX-DE theme: Blade — neon magenta and violet.
+name = "blade"
+background = "#0d0016"
+panel_bg = "#160024"
+border = "#ff2bd6"
+text_primary = "#f2c9ff"
+text_secondary = "#a86bc4"
+accent = "#7cf5ff"
+warning = "#ffb02e"
+error = "#ff4b4b"
+cursor = "#ff2bd6"
+selection = "#ff2bd655"
+glow = 0.8
+
+[terminal]
+fg = "#f2c9ff"
+bg = "#0d0016"
+palette = [
+  "#0d0016", "#ff4b4b", "#5cff9d", "#ffd166", "#5e7bff", "#ff2bd6", "#7cf5ff", "#f2c9ff", "#5a3a70", "#ff8585", "#9dffc4", "#ffe3a3", "#9cb0ff", "#ff8ae8", "#b3faff", "#ffffff",
+]
+
+[keyboard]
+key = "#1c0730"
+key_active = "#ff2bd6d8"
+key_border = "#ff2bd699"

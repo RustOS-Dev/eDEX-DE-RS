@@ -1,0 +1,25 @@
+# eDEX-DE theme: Purple — royal violet.
+name = "purple"
+background = "#0f0a1e"
+panel_bg = "#170f2e"
+border = "#b388ff"
+text_primary = "#ecdfff"
+text_secondary = "#9a86c4"
+accent = "#ff80ab"
+warning = "#ffd54f"
+error = "#ff5252"
+cursor = "#b388ff"
+selection = "#b388ff55"
+glow = 0.8
+
+[terminal]
+fg = "#ecdfff"
+bg = "#0f0a1e"
+palette = [
+  "#0f0a1e", "#ff5252", "#69f0ae", "#ffd54f", "#448aff", "#b388ff", "#84ffff", "#ecdfff", "#4a3a6e", "#ff8a80", "#a7ffd5", "#ffe89a", "#82b1ff", "#d1b3ff", "#b3ffff", "#ffffff",
+]
+
+[keyboard]
+key = "#1f1440"
+key_active = "#b388ffd8"
+key_border = "#b388ff99"

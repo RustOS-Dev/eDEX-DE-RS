@@ -1,0 +1,25 @@
+# eDEX-DE theme: Horizon — sunset orange over navy.
+name = "horizon"
+background = "#0f0a14"
+panel_bg = "#1a1022"
+border = "#ff7b3d"
+text_primary = "#ffe3d1"
+text_secondary = "#c48a6f"
+accent = "#ffd166"
+warning = "#ffb703"
+error = "#ef476f"
+cursor = "#ff7b3d"
+selection = "#ff7b3d55"
+glow = 0.8
+
+[terminal]
+fg = "#ffe3d1"
+bg = "#0f0a14"
+palette = [
+  "#0f0a14", "#ef476f", "#06d6a0", "#ffd166", "#4d9de0", "#e15fed", "#3bceac", "#ffe3d1", "#5c4a5a", "#ff7a99", "#5ff5c4", "#ffe39a", "#8fc2ff", "#f294ff", "#8fe9d8", "#ffffff",
+]
+
+[keyboard]
+key = "#241428"
+key_active = "#ff7b3dd8"
+key_border = "#ff7b3d99"

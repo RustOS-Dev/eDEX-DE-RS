@@ -1,0 +1,25 @@
+# eDEX-DE theme: Apollo — mission-control white on grey.
+name = "apollo"
+background = "#0e0f12"
+panel_bg = "#15171c"
+border = "#e8e8e8"
+text_primary = "#f4f4f4"
+text_secondary = "#9a9ca3"
+accent = "#ffcc00"
+warning = "#ff9900"
+error = "#ff3b30"
+cursor = "#e8e8e8"
+selection = "#e8e8e855"
+glow = 0.4
+
+[terminal]
+fg = "#f4f4f4"
+bg = "#0e0f12"
+palette = [
+  "#0e0f12", "#ff3b30", "#34c759", "#ffcc00", "#0a84ff", "#bf5af2", "#5ac8fa", "#f4f4f4", "#4a4c52", "#ff6961", "#5ee27f", "#ffe066", "#5eaaff", "#d38cff", "#8fdcff", "#ffffff",
+]
+
+[keyboard]
+key = "#1b1d23"
+key_active = "#e8e8e8d8"
+key_border = "#e8e8e899"

@@ -1,0 +1,25 @@
+# eDEX-DE theme: Red — alert-state crimson.
+name = "red"
+background = "#140000"
+panel_bg = "#1e0000"
+border = "#ff1e3c"
+text_primary = "#ffd0d6"
+text_secondary = "#c0616f"
+accent = "#ff9f1c"
+warning = "#ff9f1c"
+error = "#ff1e3c"
+cursor = "#ff1e3c"
+selection = "#ff1e3c55"
+glow = 0.8
+
+[terminal]
+fg = "#ffd0d6"
+bg = "#140000"
+palette = [
+  "#140000", "#ff1e3c", "#ff7f50", "#ff9f1c", "#c74b7a", "#ff5ea0", "#ff8c8c", "#ffd0d6", "#5a2a30", "#ff6b7f", "#ffa78a", "#ffc46b", "#e08aa8", "#ff9ec7", "#ffb3b3", "#ffffff",
+]
+
+[keyboard]
+key = "#2a0008"
+key_active = "#ff1e3cd8"
+key_border = "#ff1e3c99"
