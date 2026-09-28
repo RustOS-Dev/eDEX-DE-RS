@@ -129,11 +129,7 @@ mod tests {
         std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
             let mut log = Vec::new();
-            loop {
-                let req = match Request::read_from(&mut s) {
-                    Ok(r) => r,
-                    Err(_) => break,
-                };
+            while let Ok(req) = Request::read_from(&mut s) {
                 log.push(format!("{req:?}"));
                 let resp = match req {
                     Request::CreateSession { username } if username == "ari" => {
