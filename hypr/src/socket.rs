@@ -116,7 +116,8 @@ impl HyprSocket {
 
     /// Send a raw request (e.g. `j/monitors` or `dispatch workspace 2`).
     pub fn request(&self, command: &str) -> Result<String> {
-        let mut stream = UnixStream::connect(&self.path).with_context(|| format!("connecting to {}", self.path.display()))?;
+        let mut stream = UnixStream::connect(&self.path)
+            .with_context(|| format!("connecting to {}", self.path.display()))?;
         stream.set_read_timeout(Some(Duration::from_secs(4)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
         stream.write_all(command.as_bytes())?;
@@ -128,7 +129,12 @@ impl HyprSocket {
 
     fn json<T: for<'de> Deserialize<'de>>(&self, command: &str) -> Result<T> {
         let raw = self.request(&format!("j/{command}"))?;
-        serde_json::from_str(&raw).with_context(|| format!("parsing `{command}` reply: {}", raw.chars().take(200).collect::<String>()))
+        serde_json::from_str(&raw).with_context(|| {
+            format!(
+                "parsing `{command}` reply: {}",
+                raw.chars().take(200).collect::<String>()
+            )
+        })
     }
 
     pub fn dispatch(&self, dispatcher: &str) -> Result<()> {
@@ -161,7 +167,15 @@ impl HyprSocket {
 
     pub fn version(&self) -> Result<String> {
         let v: serde_json::Value = self.json("version")?;
-        Ok(v.get("tag").and_then(|t| t.as_str()).map(|s| s.to_string()).unwrap_or_else(|| v.get("commit").and_then(|c| c.as_str()).unwrap_or("unknown").to_string()))
+        Ok(v.get("tag")
+            .and_then(|t| t.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                v.get("commit")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            }))
     }
 
     pub fn monitors(&self) -> Result<Vec<MonitorInfo>> {
@@ -244,8 +258,16 @@ impl HyprSocket {
         let v: serde_json::Value = self.json("devices")?;
         Ok(v.get("keyboards")
             .and_then(|k| k.as_array())
-            .and_then(|ks| ks.iter().find(|k| k.get("main").and_then(|m| m.as_bool()).unwrap_or(false)).or(ks.first()))
-            .and_then(|k| k.get("active_keymap").and_then(|s| s.as_str()).map(|s| s.to_string())))
+            .and_then(|ks| {
+                ks.iter()
+                    .find(|k| k.get("main").and_then(|m| m.as_bool()).unwrap_or(false))
+                    .or(ks.first())
+            })
+            .and_then(|k| {
+                k.get("active_keymap")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+            }))
     }
 }
 

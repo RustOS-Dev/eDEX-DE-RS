@@ -2,7 +2,10 @@
 
 use std::{
     io::{BufRead, BufReader, ErrorKind, Write},
-    os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+    os::unix::{
+        fs::PermissionsExt,
+        net::{UnixListener, UnixStream},
+    },
     path::PathBuf,
 };
 
@@ -41,13 +44,17 @@ impl IpcServer {
         }
         if path.exists() {
             match UnixStream::connect(&path) {
-                Ok(_) => anyhow::bail!("another edex-de instance is already listening on {}", path.display()),
+                Ok(_) => anyhow::bail!(
+                    "another edex-de instance is already listening on {}",
+                    path.display()
+                ),
                 Err(_) => {
                     std::fs::remove_file(&path).ok();
                 }
             }
         }
-        let listener = UnixListener::bind(&path).with_context(|| format!("binding {}", path.display()))?;
+        let listener =
+            UnixListener::bind(&path).with_context(|| format!("binding {}", path.display()))?;
         listener.set_nonblocking(true)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         debug!(path = %path.display(), "ipc listening");
@@ -91,7 +98,13 @@ fn read_request(stream: UnixStream) -> Option<Pending> {
         Ok(request) => Some(Pending { request, stream }),
         Err(e) => {
             let mut s = stream;
-            let _ = s.write_all(format!("{}\n", serde_json::to_string(&Response::err(format!("bad request: {e}"))).unwrap()).as_bytes());
+            let _ = s.write_all(
+                format!(
+                    "{}\n",
+                    serde_json::to_string(&Response::err(format!("bad request: {e}"))).unwrap()
+                )
+                .as_bytes(),
+            );
             None
         }
     }

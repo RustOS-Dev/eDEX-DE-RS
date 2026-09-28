@@ -18,13 +18,21 @@ pub struct FrameOptions {
     pub title: String,
 }
 
-pub fn build_frame<L: EventListener>(term: &Term<L>, palette: &Palette, opts: &FrameOptions) -> TerminalFrame {
+pub fn build_frame<L: EventListener>(
+    term: &Term<L>,
+    palette: &Palette,
+    opts: &FrameOptions,
+) -> TerminalFrame {
     let content = term.renderable_content();
     let cols = term.columns();
     let rows = term.screen_lines();
     let display_offset = content.display_offset;
     let colors = content.colors;
-    let mut lines: Vec<TerminalLine> = (0..rows).map(|_| TerminalLine { cells: Vec::with_capacity(cols) }).collect();
+    let mut lines: Vec<TerminalLine> = (0..rows)
+        .map(|_| TerminalLine {
+            cells: Vec::with_capacity(cols),
+        })
+        .collect();
     let mut selection = Vec::new();
     let mut sel_row: Option<(usize, usize, usize)> = None;
 
@@ -36,8 +44,14 @@ pub fn build_frame<L: EventListener>(term: &Term<L>, palette: &Palette, opts: &F
         let col = indexed.point.column.0;
         let cell = &indexed.cell;
         let flags = cell.flags;
-        if flags.contains(Flags::WIDE_CHAR_SPACER) || flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
-            lines[row].cells.push(Cell { text: String::new(), style: default_style(palette), wide: false });
+        if flags.contains(Flags::WIDE_CHAR_SPACER)
+            || flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            lines[row].cells.push(Cell {
+                text: String::new(),
+                style: default_style(palette),
+                wide: false,
+            });
             continue;
         }
         let bold = flags.intersects(Flags::BOLD);
@@ -56,9 +70,20 @@ pub fn build_frame<L: EventListener>(term: &Term<L>, palette: &Palette, opts: &F
         if let Some(zw) = cell.zerowidth() {
             text.extend(zw.iter());
         }
-        if text.is_empty() && bg == palette.bg && !flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT) {
+        if text.is_empty()
+            && bg == palette.bg
+            && !flags.intersects(Flags::ALL_UNDERLINES | Flags::STRIKEOUT)
+        {
             // Blank cell with default background: keep it cheap.
-            lines[row].cells.push(Cell { text: String::new(), style: CellStyle { fg, bg, ..default_style(palette) }, wide: false });
+            lines[row].cells.push(Cell {
+                text: String::new(),
+                style: CellStyle {
+                    fg,
+                    bg,
+                    ..default_style(palette)
+                },
+                wide: false,
+            });
         } else {
             lines[row].cells.push(Cell {
                 text,
@@ -103,8 +128,16 @@ pub fn build_frame<L: EventListener>(term: &Term<L>, palette: &Palette, opts: &F
                 AlacCursorShape::Hidden => CursorShape::Hidden,
                 AlacCursorShape::HollowBlock => CursorShape::Block,
             };
-            let shape = if !opts.cursor_visible && opts.focused { CursorShape::Hidden } else { shape };
-            Some(Cursor { col: p.column.0, row: row as usize, shape })
+            let shape = if !opts.cursor_visible && opts.focused {
+                CursorShape::Hidden
+            } else {
+                shape
+            };
+            Some(Cursor {
+                col: p.column.0,
+                row: row as usize,
+                shape,
+            })
         } else {
             None
         }
@@ -127,5 +160,13 @@ pub fn build_frame<L: EventListener>(term: &Term<L>, palette: &Palette, opts: &F
 }
 
 fn default_style(palette: &Palette) -> CellStyle {
-    CellStyle { fg: palette.fg, bg: palette.bg, bold: false, italic: false, underline: false, strikeout: false, dim: false }
+    CellStyle {
+        fg: palette.fg,
+        bg: palette.bg,
+        bold: false,
+        italic: false,
+        underline: false,
+        strikeout: false,
+        dim: false,
+    }
 }

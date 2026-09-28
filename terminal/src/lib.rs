@@ -4,13 +4,7 @@ pub mod colors;
 pub mod frame;
 pub mod input;
 
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::Arc,
-    thread::JoinHandle,
-    time::Instant,
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, thread::JoinHandle, time::Instant};
 
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener, Notify, WindowSize},
@@ -133,7 +127,11 @@ impl EventListener for Listener {
             AlacEvent::ClipboardStore(_, text) => TermEvent::ClipboardStore(text),
             AlacEvent::ClipboardLoad(_, formatter) => TermEvent::ClipboardLoad(self.id, formatter),
             AlacEvent::CursorBlinkingChange => TermEvent::CursorBlinkingChange(self.id),
-            AlacEvent::PtyWrite(_) | AlacEvent::MouseCursorDirty | AlacEvent::ColorRequest(..) | AlacEvent::TextAreaSizeRequest(_) | AlacEvent::Exit => return,
+            AlacEvent::PtyWrite(_)
+            | AlacEvent::MouseCursorDirty
+            | AlacEvent::ColorRequest(..)
+            | AlacEvent::TextAreaSizeRequest(_)
+            | AlacEvent::Exit => return,
         };
         self.sink.send(out);
     }
@@ -144,7 +142,12 @@ struct Tab {
     term: Arc<FairMutex<Term<Listener>>>,
     notifier: Notifier,
     sender: EventLoopSender,
-    join: Option<JoinHandle<(EventLoop<tty::Pty, Listener>, alacritty_terminal::event_loop::State)>>,
+    join: Option<
+        JoinHandle<(
+            EventLoop<tty::Pty, Listener>,
+            alacritty_terminal::event_loop::State,
+        )>,
+    >,
     title: Option<String>,
     exited: Option<i32>,
     bell_at: Option<Instant>,
@@ -187,7 +190,14 @@ pub struct TerminalTabs {
 }
 
 impl TerminalTabs {
-    pub fn new(config: TerminalConfig, sink: Arc<dyn EventSink>, cols: usize, rows: usize, cell_w: f32, cell_h: f32) -> Result<Self> {
+    pub fn new(
+        config: TerminalConfig,
+        sink: Arc<dyn EventSink>,
+        cols: usize,
+        rows: usize,
+        cell_w: f32,
+        cell_h: f32,
+    ) -> Result<Self> {
         tty::setup_env();
         let mut tabs = Self {
             tabs: Vec::new(),
@@ -195,7 +205,10 @@ impl TerminalTabs {
             next_id: 1,
             cols: cols.max(2),
             rows: rows.max(1),
-            cell_size: (cell_w.round().max(1.0) as u16, cell_h.round().max(1.0) as u16),
+            cell_size: (
+                cell_w.round().max(1.0) as u16,
+                cell_h.round().max(1.0) as u16,
+            ),
             config,
             sink,
             ids: HashMap::new(),
@@ -229,7 +242,11 @@ impl TerminalTabs {
                 },
                 blinking: self.config.cursor_blink,
             },
-            osc52: if self.config.osc52_read { term::Osc52::CopyPaste } else { term::Osc52::OnlyCopy },
+            osc52: if self.config.osc52_read {
+                term::Osc52::CopyPaste
+            } else {
+                term::Osc52::OnlyCopy
+            },
             ..TermConfig::default()
         }
     }
@@ -238,30 +255,65 @@ impl TerminalTabs {
     pub fn new_tab(&mut self) -> Result<usize> {
         let id = self.next_id;
         self.next_id += 1;
-        let listener = Listener { id, sink: self.sink.clone() };
+        let listener = Listener {
+            id,
+            sink: self.sink.clone(),
+        };
         let size = self.window_size();
-        let term = Term::new(self.term_config(), &GridSize { cols: self.cols, rows: self.rows }, listener.clone());
+        let term = Term::new(
+            self.term_config(),
+            &GridSize {
+                cols: self.cols,
+                rows: self.rows,
+            },
+            listener.clone(),
+        );
         let term = Arc::new(FairMutex::new(term));
         let mut env = HashMap::new();
         env.insert("TERM".to_string(), "xterm-256color".to_string());
         env.insert("COLORTERM".to_string(), "truecolor".to_string());
         env.insert("TERM_PROGRAM".to_string(), "edex-de".to_string());
-        env.insert("TERM_PROGRAM_VERSION".to_string(), env!("CARGO_PKG_VERSION").to_string());
-        let shell = self.config.shell.clone().map(|program| tty::Shell::new(program, self.config.shell_args.clone()));
+        env.insert(
+            "TERM_PROGRAM_VERSION".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        );
+        let shell = self
+            .config
+            .shell
+            .clone()
+            .map(|program| tty::Shell::new(program, self.config.shell_args.clone()));
         let working_directory = self
             .config
             .working_directory
             .clone()
             .or_else(|| self.tabs.get(self.active).and_then(child_cwd))
             .or_else(|| std::env::var("HOME").ok().map(PathBuf::from));
-        let options = tty::Options { shell, working_directory, drain_on_exit: false, env };
+        let options = tty::Options {
+            shell,
+            working_directory,
+            drain_on_exit: false,
+            env,
+        };
         let pty = tty::new(&options, size, id).context("failed to spawn PTY")?;
         let child_pid = pty.child().id();
-        let event_loop = EventLoop::new(term.clone(), listener, pty, false, false).context("failed to create PTY event loop")?;
+        let event_loop = EventLoop::new(term.clone(), listener, pty, false, false)
+            .context("failed to create PTY event loop")?;
         let sender = event_loop.channel();
         let notifier = Notifier(sender.clone());
         let join = event_loop.spawn();
-        self.tabs.push(Tab { id, term, notifier, sender, join: Some(join), title: None, exited: None, bell_at: None, pending_clipboard: None, dragging: false, child_pid });
+        self.tabs.push(Tab {
+            id,
+            term,
+            notifier,
+            sender,
+            join: Some(join),
+            title: None,
+            exited: None,
+            bell_at: None,
+            pending_clipboard: None,
+            dragging: false,
+            child_pid,
+        });
         self.active = self.tabs.len() - 1;
         self.reindex();
         info!(tab = id, "terminal tab spawned");
@@ -269,7 +321,12 @@ impl TerminalTabs {
     }
 
     fn reindex(&mut self) {
-        self.ids = self.tabs.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
+        self.ids = self
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.id, i))
+            .collect();
     }
 
     /// Close a tab; the last tab is replaced with a fresh shell.
@@ -328,19 +385,28 @@ impl TerminalTabs {
         self.tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| TabInfo { title: t.display_title(), active: i == self.active, exited: t.exited.is_some() })
+            .map(|(i, t)| TabInfo {
+                title: t.display_title(),
+                active: i == self.active,
+                exited: t.exited.is_some(),
+            })
             .collect()
     }
 
     pub fn active_exited(&self) -> bool {
-        self.tabs.get(self.active).is_some_and(|t| t.exited.is_some())
+        self.tabs
+            .get(self.active)
+            .is_some_and(|t| t.exited.is_some())
     }
 
     /// Resize every tab's grid and PTY.
     pub fn resize(&mut self, cols: usize, rows: usize, cell_w: f32, cell_h: f32) {
         let cols = cols.max(2);
         let rows = rows.max(1);
-        let cell = (cell_w.round().max(1.0) as u16, cell_h.round().max(1.0) as u16);
+        let cell = (
+            cell_w.round().max(1.0) as u16,
+            cell_h.round().max(1.0) as u16,
+        );
         if cols == self.cols && rows == self.rows && cell == self.cell_size {
             return;
         }
@@ -383,14 +449,19 @@ impl TerminalTabs {
             .get(self.active)
             .map(|t| {
                 let mode = *t.term.lock().mode();
-                KeyModes { app_cursor: mode.contains(TermMode::APP_CURSOR), app_keypad: mode.contains(TermMode::APP_KEYPAD) }
+                KeyModes {
+                    app_cursor: mode.contains(TermMode::APP_CURSOR),
+                    app_keypad: mode.contains(TermMode::APP_KEYPAD),
+                }
             })
             .unwrap_or_default()
     }
 
     /// Handle a key press for the active tab. Returns true if the key was consumed.
     pub fn key_press(&mut self, keysym: u32, text: Option<&str>, mods: Modifiers) -> bool {
-        let Some(tab) = self.tabs.get(self.active) else { return false };
+        let Some(tab) = self.tabs.get(self.active) else {
+            return false;
+        };
         if tab.exited.is_some() {
             if keysym == xkbcommon::xkb::keysyms::KEY_Return {
                 let idx = self.active;
@@ -436,7 +507,9 @@ impl TerminalTabs {
 
     /// Paste text into the active tab (bracketed when the app requested it).
     pub fn paste(&mut self, text: &str) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
         if let Some(formatter) = tab.pending_clipboard.clone() {
             let idx = self.active;
             self.tabs[idx].pending_clipboard = None;
@@ -455,13 +528,22 @@ impl TerminalTabs {
 
     /// Scroll the active tab by `lines` (negative = towards history).
     pub fn scroll(&mut self, lines: i32) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
         let mut term = tab.term.lock();
         let mode = *term.mode();
-        if mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL) && !mode.intersects(TermMode::MOUSE_MODE) {
+        if mode.contains(TermMode::ALT_SCREEN)
+            && mode.contains(TermMode::ALTERNATE_SCROLL)
+            && !mode.intersects(TermMode::MOUSE_MODE)
+        {
             drop(term);
             let modes = self.key_modes();
-            let key = if lines < 0 { xkbcommon::xkb::keysyms::KEY_Up } else { xkbcommon::xkb::keysyms::KEY_Down };
+            let key = if lines < 0 {
+                xkbcommon::xkb::keysyms::KEY_Up
+            } else {
+                xkbcommon::xkb::keysyms::KEY_Down
+            };
             for _ in 0..lines.unsigned_abs() {
                 if let Some(b) = input::key_to_bytes(key, None, Modifiers::default(), modes) {
                     tab.write(b);
@@ -478,8 +560,18 @@ impl TerminalTabs {
         mode.intersects(TermMode::MOUSE_MODE).then_some(mode)
     }
 
-    fn mouse_report(&self, button: u32, col: usize, row: usize, mods: Modifiers, pressed: bool, motion: bool) {
-        let Some(tab) = self.tabs.get(self.active) else { return };
+    fn mouse_report(
+        &self,
+        button: u32,
+        col: usize,
+        row: usize,
+        mods: Modifiers,
+        pressed: bool,
+        motion: bool,
+    ) {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return;
+        };
         let mut b = match button {
             0x110 => 0,
             0x112 => 1,
@@ -502,7 +594,12 @@ impl TerminalTabs {
         }
         let sgr = tab.term.lock().mode().contains(TermMode::SGR_MOUSE);
         let seq = if sgr {
-            format!("\x1b[<{b};{};{}{}", col + 1, row + 1, if pressed { 'M' } else { 'm' })
+            format!(
+                "\x1b[<{b};{};{}{}",
+                col + 1,
+                row + 1,
+                if pressed { 'M' } else { 'm' }
+            )
         } else {
             let b = if pressed { b } else { 3 };
             let mut v = vec![0x1b, b'[', b'M', (32 + b) as u8];
@@ -518,7 +615,14 @@ impl TerminalTabs {
 
     /// Pointer button on the grid at (col, row). Returns true if the event was consumed
     /// by mouse reporting or selection.
-    pub fn mouse_press(&mut self, col: usize, row: usize, button: u32, mods: Modifiers, click_count: u8) -> bool {
+    pub fn mouse_press(
+        &mut self,
+        col: usize,
+        row: usize,
+        button: u32,
+        mods: Modifiers,
+        click_count: u8,
+    ) -> bool {
         if let Some(mode) = self.active_mouse_mode() {
             if !mods.shift {
                 let _ = mode;
@@ -529,10 +633,15 @@ impl TerminalTabs {
         if button != 0x110 {
             return false;
         }
-        let Some(tab) = self.tabs.get_mut(self.active) else { return false };
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return false;
+        };
         let mut term = tab.term.lock();
         let display_offset = term.grid().display_offset();
-        let point = term::viewport_to_point(display_offset, Point::new(row, Column(col.min(self.cols.saturating_sub(1)))));
+        let point = term::viewport_to_point(
+            display_offset,
+            Point::new(row, Column(col.min(self.cols.saturating_sub(1)))),
+        );
         let ty = match click_count {
             2 => SelectionType::Semantic,
             3 => SelectionType::Lines,
@@ -547,18 +656,35 @@ impl TerminalTabs {
 
     pub fn mouse_motion(&mut self, col: usize, row: usize, mods: Modifiers, buttons_held: bool) {
         if let Some(mode) = self.active_mouse_mode() {
-            if mode.contains(TermMode::MOUSE_MOTION) || (mode.contains(TermMode::MOUSE_DRAG) && buttons_held) {
-                self.mouse_report(if buttons_held { 0x110 } else { 3 }, col, row, mods, true, true);
+            if mode.contains(TermMode::MOUSE_MOTION)
+                || (mode.contains(TermMode::MOUSE_DRAG) && buttons_held)
+            {
+                self.mouse_report(
+                    if buttons_held { 0x110 } else { 3 },
+                    col,
+                    row,
+                    mods,
+                    true,
+                    true,
+                );
             }
             return;
         }
-        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        let Some(tab) = self.tabs.get_mut(self.active) else {
+            return;
+        };
         if !tab.dragging {
             return;
         }
         let mut term = tab.term.lock();
         let display_offset = term.grid().display_offset();
-        let point = term::viewport_to_point(display_offset, Point::new(row.min(self.rows.saturating_sub(1)), Column(col.min(self.cols.saturating_sub(1)))));
+        let point = term::viewport_to_point(
+            display_offset,
+            Point::new(
+                row.min(self.rows.saturating_sub(1)),
+                Column(col.min(self.cols.saturating_sub(1))),
+            ),
+        );
         if let Some(sel) = term.selection.as_mut() {
             sel.update(point, Side::Right);
         }
@@ -592,7 +718,10 @@ impl TerminalTabs {
 
     /// Text of the current selection in the active tab.
     pub fn selection_text(&self) -> Option<String> {
-        self.tabs.get(self.active).and_then(|t| t.term.lock().selection_to_string()).filter(|s| !s.is_empty())
+        self.tabs
+            .get(self.active)
+            .and_then(|t| t.term.lock().selection_to_string())
+            .filter(|s| !s.is_empty())
     }
 
     pub fn clear_selection(&mut self) {
@@ -639,11 +768,27 @@ impl TerminalTabs {
     }
 
     /// Build the frame for the active tab.
-    pub fn frame(&self, palette: &Palette, cursor_visible: bool, focused: bool, now: Instant) -> TerminalFrame {
-        let Some(tab) = self.tabs.get(self.active) else { return TerminalFrame::default() };
+    pub fn frame(
+        &self,
+        palette: &Palette,
+        cursor_visible: bool,
+        focused: bool,
+        now: Instant,
+    ) -> TerminalFrame {
+        let Some(tab) = self.tabs.get(self.active) else {
+            return TerminalFrame::default();
+        };
         let term = tab.term.lock();
-        let bell = tab.bell_at.is_some_and(|t| now.duration_since(t).as_millis() < 150);
-        let opts = frame::FrameOptions { cursor_visible, focused, bell, exited: tab.exited, title: tab.display_title() };
+        let bell = tab
+            .bell_at
+            .is_some_and(|t| now.duration_since(t).as_millis() < 150);
+        let opts = frame::FrameOptions {
+            cursor_visible,
+            focused,
+            bell,
+            exited: tab.exited,
+            title: tab.display_title(),
+        };
         frame::build_frame(&term, palette, &opts)
     }
 
@@ -663,7 +808,9 @@ fn child_cwd(tab: &Tab) -> Option<PathBuf> {
     if tab.exited.is_some() {
         return None;
     }
-    std::fs::read_link(format!("/proc/{}/cwd", tab.child_pid)).ok().filter(|p| p.is_dir())
+    std::fs::read_link(format!("/proc/{}/cwd", tab.child_pid))
+        .ok()
+        .filter(|p| p.is_dir())
 }
 
 #[cfg(test)]
@@ -681,20 +828,47 @@ mod tests {
     }
 
     fn term_with(bytes: &[u8], cols: usize, rows: usize) -> Term<VoidListener> {
-        let mut term = Term::new(TermConfig::default(), &GridSize { cols, rows }, VoidListener);
-        let mut parser: alacritty_terminal::vte::ansi::Processor = alacritty_terminal::vte::ansi::Processor::new();
+        let mut term = Term::new(
+            TermConfig::default(),
+            &GridSize { cols, rows },
+            VoidListener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
         parser.advance(&mut term, bytes);
         term
     }
 
     fn text_of(frame: &TerminalFrame, row: usize) -> String {
-        frame.lines[row].cells.iter().map(|c| if c.text.is_empty() { " ".to_string() } else { c.text.clone() }).collect::<String>().trim_end().to_string()
+        frame.lines[row]
+            .cells
+            .iter()
+            .map(|c| {
+                if c.text.is_empty() {
+                    " ".to_string()
+                } else {
+                    c.text.clone()
+                }
+            })
+            .collect::<String>()
+            .trim_end()
+            .to_string()
     }
 
     #[test]
     fn frame_reflects_grid_and_attributes() {
         let term = term_with(b"hello \x1b[1;31mworld\x1b[0m\r\nline2", 20, 4);
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: "t".into() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: "t".into(),
+            },
+        );
         assert_eq!(text_of(&frame, 0), "hello world");
         assert_eq!(text_of(&frame, 1), "line2");
         assert!(frame.lines[0].cells[6].style.bold);
@@ -705,10 +879,30 @@ mod tests {
     fn alt_screen_and_scroll_region() {
         let term = term_with(b"\x1b[?1049hALT", 10, 3);
         assert!(term.mode().contains(TermMode::ALT_SCREEN));
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: String::new() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: String::new(),
+            },
+        );
         assert_eq!(text_of(&frame, 0), "ALT");
         let term = term_with(b"1\r\n2\r\n3\x1b[1;2r\x1b[H\x1b[Ma", 10, 3);
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: String::new() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: String::new(),
+            },
+        );
         assert_eq!(text_of(&frame, 0), "a");
         assert_eq!(text_of(&frame, 2), "3");
     }
@@ -716,7 +910,17 @@ mod tests {
     #[test]
     fn wide_characters_take_two_cells() {
         let term = term_with("日本x".as_bytes(), 10, 2);
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: String::new() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: String::new(),
+            },
+        );
         assert!(frame.lines[0].cells[0].wide);
         assert_eq!(frame.lines[0].cells[1].text, "");
         assert_eq!(frame.lines[0].cells[4].text, "x");
@@ -725,14 +929,34 @@ mod tests {
     #[test]
     fn insert_delete_and_erase() {
         let term = term_with(b"abcdef\x1b[3G\x1b[2P\x1b[2@X\x1b[1X", 20, 2);
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: String::new() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: String::new(),
+            },
+        );
         assert_eq!(text_of(&frame, 0), "abX ef");
     }
 
     #[test]
     fn save_restore_cursor_and_sgr_colors() {
         let term = term_with(b"\x1b7\x1b[5;5H\x1b8Q\x1b[38;2;10;20;30mZ", 10, 6);
-        let frame = frame::build_frame(&term, &palette(), &frame::FrameOptions { cursor_visible: true, focused: true, bell: false, exited: None, title: String::new() });
+        let frame = frame::build_frame(
+            &term,
+            &palette(),
+            &frame::FrameOptions {
+                cursor_visible: true,
+                focused: true,
+                bell: false,
+                exited: None,
+                title: String::new(),
+            },
+        );
         assert_eq!(text_of(&frame, 0), "QZ");
         let fg = frame.lines[0].cells[1].style.fg;
         assert!((fg[0] - 10.0 / 255.0).abs() < 0.01 && (fg[2] - 30.0 / 255.0).abs() < 0.01);
@@ -744,7 +968,11 @@ mod tests {
         let sink: Arc<dyn EventSink> = Arc::new(move |e| {
             let _ = tx.send(e);
         });
-        let config = TerminalConfig { shell: Some("/bin/sh".into()), shell_args: vec!["-c".into(), "printf 'PING\\n'; sleep 0.2".into()], ..Default::default() };
+        let config = TerminalConfig {
+            shell: Some("/bin/sh".into()),
+            shell_args: vec!["-c".into(), "printf 'PING\\n'; sleep 0.2".into()],
+            ..Default::default()
+        };
         let mut tabs = TerminalTabs::new(config, sink, 40, 5, 8.0, 16.0).unwrap();
         let deadline = Instant::now() + std::time::Duration::from_secs(5);
         let mut saw_exit = false;
@@ -763,7 +991,11 @@ mod tests {
         assert_eq!(text_of(&frame, 0), "PING");
         assert!(saw_exit, "shell exit was not reported");
         assert!(tabs.active_exited());
-        tabs.key_press(xkbcommon::xkb::keysyms::KEY_Return, None, Modifiers::default());
+        tabs.key_press(
+            xkbcommon::xkb::keysyms::KEY_Return,
+            None,
+            Modifiers::default(),
+        );
         assert_eq!(tabs.len(), 1);
         assert!(!tabs.active_exited());
     }

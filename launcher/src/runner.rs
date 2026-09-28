@@ -1,6 +1,9 @@
 //! Launch applications detached from the shell process.
 
-use std::{path::PathBuf, process::{Command, Stdio}};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 use anyhow::{Context, Result};
 use tracing::info;
@@ -18,14 +21,22 @@ pub struct LaunchOptions {
 
 impl Default for LaunchOptions {
     fn default() -> Self {
-        Self { terminal_command: "kitty -e".into(), via_hyprland: false, force_terminal: false }
+        Self {
+            terminal_command: "kitty -e".into(),
+            via_hyprland: false,
+            force_terminal: false,
+        }
     }
 }
 
 /// Build the shell command line for an entry.
 pub fn command_line(app: &AppEntry, opts: &LaunchOptions) -> String {
     let exec = expand_exec(app);
-    let mut cmd = if app.terminal || opts.force_terminal { format!("{} {}", opts.terminal_command, exec) } else { exec };
+    let mut cmd = if app.terminal || opts.force_terminal {
+        format!("{} {}", opts.terminal_command, exec)
+    } else {
+        exec
+    };
     if let Some(path) = &app.path {
         cmd = format!("cd {} && {}", crate::desktop::shell_quote(path), cmd);
     }
@@ -43,7 +54,13 @@ pub fn launch(app: &AppEntry, opts: &LaunchOptions) -> Result<()> {
 /// Spawn an arbitrary shell command detached from the shell.
 pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
     if via_hyprland && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
-        let status = Command::new("hyprctl").arg("dispatch").arg("exec").arg(cmd).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let status = Command::new("hyprctl")
+            .arg("dispatch")
+            .arg("exec")
+            .arg(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         if let Ok(s) = status {
             if s.success() {
                 return Ok(());
@@ -69,7 +86,12 @@ pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
 
 /// Path of the launch history file.
 pub fn history_path() -> PathBuf {
-    let state = std::env::var("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())).join(".local/state"));
+    let state = std::env::var("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+                .join(".local/state")
+        });
     state.join("edex-de").join("launcher-history.json")
 }
 
@@ -93,7 +115,10 @@ mod tests {
             startup_wm_class: None,
             file: PathBuf::from("/usr/share/applications/htop.desktop"),
         };
-        assert_eq!(command_line(&app, &LaunchOptions::default()), "cd '/tmp' && kitty -e htop");
+        assert_eq!(
+            command_line(&app, &LaunchOptions::default()),
+            "cd '/tmp' && kitty -e htop"
+        );
     }
 
     #[test]

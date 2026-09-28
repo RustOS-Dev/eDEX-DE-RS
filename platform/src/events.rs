@@ -64,16 +64,40 @@ pub enum PlatformEvent<E> {
         scale: f64,
     },
     /// The surface's preferred scale changed without a size change.
-    ScaleChanged { surface: SurfaceId, scale: f64 },
+    ScaleChanged {
+        surface: SurfaceId,
+        scale: f64,
+    },
     /// A previously requested frame callback fired: the surface may render again.
-    Frame { surface: SurfaceId },
-    KeyboardEnter { surface: SurfaceId },
-    KeyboardLeave { surface: SurfaceId },
-    Key { surface: SurfaceId, key: KeyInput },
-    ModifiersChanged { modifiers: Modifiers },
-    PointerEnter { surface: SurfaceId, x: f64, y: f64 },
-    PointerLeave { surface: SurfaceId },
-    PointerMotion { surface: SurfaceId, x: f64, y: f64 },
+    Frame {
+        surface: SurfaceId,
+    },
+    KeyboardEnter {
+        surface: SurfaceId,
+    },
+    KeyboardLeave {
+        surface: SurfaceId,
+    },
+    Key {
+        surface: SurfaceId,
+        key: KeyInput,
+    },
+    ModifiersChanged {
+        modifiers: Modifiers,
+    },
+    PointerEnter {
+        surface: SurfaceId,
+        x: f64,
+        y: f64,
+    },
+    PointerLeave {
+        surface: SurfaceId,
+    },
+    PointerMotion {
+        surface: SurfaceId,
+        x: f64,
+        y: f64,
+    },
     PointerButton {
         surface: SurfaceId,
         button: u32,
@@ -90,9 +114,14 @@ pub enum PlatformEvent<E> {
         y: f64,
     },
     /// The compositor closed the surface (layer surface closed or window close request).
-    Closed { surface: SurfaceId },
+    Closed {
+        surface: SurfaceId,
+    },
     /// Clipboard contents arrived in response to `request_paste`.
-    Paste { text: String, primary: bool },
+    Paste {
+        text: String,
+        primary: bool,
+    },
     /// An application-defined event pushed through a calloop source.
     App(E),
 }

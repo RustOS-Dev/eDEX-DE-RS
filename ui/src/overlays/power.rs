@@ -27,20 +27,63 @@ pub fn draw(ctx: &mut Ctx, screen: Rect, state: &ShellState) {
         let selected = i == p.selected;
         let danger = matches!(action, PowerAction::Reboot | PowerAction::PowerOff);
         let color = if danger { t.error } else { t.border };
-        let fill = if selected { with_alpha(color, 0.25) } else { with_alpha(color, 0.06) };
-        ctx.scene.panel(r, fill, if selected { color } else { with_alpha(color, 0.5) }, 1.0, if selected { 0.9 } else { 0.0 });
+        let fill = if selected {
+            with_alpha(color, 0.25)
+        } else {
+            with_alpha(color, 0.06)
+        };
+        ctx.scene.panel(
+            r,
+            fill,
+            if selected {
+                color
+            } else {
+                with_alpha(color, 0.5)
+            },
+            1.0,
+            if selected { 0.9 } else { 0.0 },
+        );
         let big = (ctx.font() * 2.4).round();
-        ctx.scene.text_aligned(Rect::new(r.x, r.y + 18.0, r.w, big * 1.3), big, color, Align::Center, action.glyph());
+        ctx.scene.text_aligned(
+            Rect::new(r.x, r.y + 18.0, r.w, big * 1.3),
+            big,
+            color,
+            Align::Center,
+            action.glyph(),
+        );
         let s = ctx.small();
-        ctx.scene.text_bold(Rect::new(r.x, r.bottom() - line - 10.0, r.w, line), s, if selected { t.text_primary } else { t.text_secondary }, Align::Center, action.label());
+        ctx.scene.text_bold(
+            Rect::new(r.x, r.bottom() - line - 10.0, r.w, line),
+            s,
+            if selected {
+                t.text_primary
+            } else {
+                t.text_secondary
+            },
+            Align::Center,
+            action.label(),
+        );
         ctx.hits.push(r, HitTarget::OverlayItem(i as u32));
         x += tile + gap;
     }
     let hint_y = inner.y + tile + 20.0;
     let hint = match p.confirm {
-        Some(a) => format!("Confirm {}? Press Enter again or click. Esc cancels.", a.label()),
+        Some(a) => format!(
+            "Confirm {}? Press Enter again or click. Esc cancels.",
+            a.label()
+        ),
         None => "← → select   Enter confirm   Esc close".to_string(),
     };
-    let color = if p.confirm.is_some() { t.warning } else { t.text_dim };
-    ctx.scene.text_aligned(Rect::new(inner.x, hint_y, inner.w, line), ctx.metrics.ui_font, color, Align::Center, hint);
+    let color = if p.confirm.is_some() {
+        t.warning
+    } else {
+        t.text_dim
+    };
+    ctx.scene.text_aligned(
+        Rect::new(inner.x, hint_y, inner.w, line),
+        ctx.metrics.ui_font,
+        color,
+        Align::Center,
+        hint,
+    );
 }

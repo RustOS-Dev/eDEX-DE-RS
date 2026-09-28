@@ -307,7 +307,11 @@ impl ShellState {
             now: Instant::now(),
             overlay: None,
             launcher: LauncherState::default(),
-            power: PowerMenuState { selected: 0, available: PowerAction::ALL.to_vec(), confirm: None },
+            power: PowerMenuState {
+                selected: 0,
+                available: PowerAction::ALL.to_vec(),
+                confirm: None,
+            },
             settings: TabbedForms::default(),
             privacy: TabbedForms::default(),
             notifications: NotificationsView::default(),

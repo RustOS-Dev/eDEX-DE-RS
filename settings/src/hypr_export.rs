@@ -17,7 +17,10 @@ pub fn render_lua(config: &Config) -> String {
     out.push_str("-- Loaded after the system config, before ~/.config/hypr/user.lua.\n\n");
     for m in &config.display.monitors {
         if m.disabled {
-            out.push_str(&format!("hl.monitor({{ output = {}, disabled = true }})\n", lua_str(&m.name)));
+            out.push_str(&format!(
+                "hl.monitor({{ output = {}, disabled = true }})\n",
+                lua_str(&m.name)
+            ));
         } else {
             out.push_str(&format!(
                 "hl.monitor({{ output = {}, mode = {}, position = {}, scale = {}, transform = {} }})\n",
@@ -39,10 +42,12 @@ pub fn render_lua(config: &Config) -> String {
     ));
     out.push_str(&format!(
         "    decoration = {{ rounding = {}, blur = {{ enabled = {} }} }},\n",
-        config.wm.rounding,
-        config.wm.blur
+        config.wm.rounding, config.wm.blur
     ));
-    out.push_str(&format!("    animations = {{ enabled = {} }},\n", config.wm.animations));
+    out.push_str(&format!(
+        "    animations = {{ enabled = {} }},\n",
+        config.wm.animations
+    ));
     out.push_str(&format!(
         "    input = {{ kb_layout = {}, kb_variant = {}, kb_options = {}, repeat_rate = {}, repeat_delay = {}, sensitivity = {}, touchpad = {{ natural_scroll = {}, tap_to_click = {} }} }},\n",
         lua_str(&config.input.kb_layout),
@@ -77,7 +82,10 @@ pub fn render_hypridle(config: &Config, lock_cmd: &str) -> String {
         ));
     }
     if p.lock_after > 0 {
-        out.push_str(&format!("listener {{\n    timeout = {}\n    on-timeout = loginctl lock-session\n}}\n\n", p.lock_after));
+        out.push_str(&format!(
+            "listener {{\n    timeout = {}\n    on-timeout = loginctl lock-session\n}}\n\n",
+            p.lock_after
+        ));
     }
     if p.dpms_after > 0 {
         out.push_str(&format!(
@@ -86,7 +94,10 @@ pub fn render_hypridle(config: &Config, lock_cmd: &str) -> String {
         ));
     }
     if p.suspend_after > 0 {
-        out.push_str(&format!("listener {{\n    timeout = {}\n    on-timeout = systemctl suspend\n}}\n", p.suspend_after));
+        out.push_str(&format!(
+            "listener {{\n    timeout = {}\n    on-timeout = systemctl suspend\n}}\n",
+            p.suspend_after
+        ));
     }
     out
 }
@@ -107,7 +118,14 @@ mod tests {
     #[test]
     fn golden_lua() {
         let mut c = Config::default();
-        c.display.monitors.push(crate::config::Monitor { name: "DP-1".into(), mode: "2560x1440@144".into(), position: "0x0".into(), scale: 1.25, transform: 0, disabled: false });
+        c.display.monitors.push(crate::config::Monitor {
+            name: "DP-1".into(),
+            mode: "2560x1440@144".into(),
+            position: "0x0".into(),
+            scale: 1.25,
+            transform: 0,
+            disabled: false,
+        });
         insta::assert_snapshot!(render_lua(&c));
         insta::assert_snapshot!(render_hypridle(&c, "hyprlock"));
     }

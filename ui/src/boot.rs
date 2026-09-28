@@ -39,7 +39,15 @@ impl Default for BootAnimation {
 impl BootAnimation {
     pub fn new(enabled: bool) -> Self {
         let now = Instant::now();
-        Self { start: now, line: 0, chars: 0, last_step: now, fade_start: None, done: !enabled, enabled }
+        Self {
+            start: now,
+            line: 0,
+            chars: 0,
+            last_step: now,
+            fade_start: None,
+            done: !enabled,
+            enabled,
+        }
     }
 
     pub fn skip(&mut self) {
@@ -79,7 +87,10 @@ impl BootAnimation {
 
     /// Lines currently displayed (the last one may be partial).
     pub fn lines(&self) -> Vec<String> {
-        let mut out: Vec<String> = BOOT_LINES[..self.line].iter().map(|s| s.to_string()).collect();
+        let mut out: Vec<String> = BOOT_LINES[..self.line]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let current = BOOT_LINES[self.line];
         out.push(current.chars().take(self.chars).collect());
         out
@@ -91,7 +102,9 @@ impl BootAnimation {
             return 0.0;
         }
         match self.fade_start {
-            Some(fade) => 1.0 - (now.duration_since(fade).as_secs_f32() / FADE.as_secs_f32()).clamp(0.0, 1.0),
+            Some(fade) => {
+                1.0 - (now.duration_since(fade).as_secs_f32() / FADE.as_secs_f32()).clamp(0.0, 1.0)
+            }
             None => 1.0,
         }
     }

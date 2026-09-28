@@ -56,13 +56,22 @@ fn to_color(c: [f32; 4]) -> Color {
 
 impl TextCache {
     pub fn new(family: Option<String>) -> Self {
-        let family_static = family.as_deref().map(|f| &*Box::leak(f.to_string().into_boxed_str()));
-        Self { entries: HashMap::new(), generation: 0, family, family_static }
+        let family_static = family
+            .as_deref()
+            .map(|f| &*Box::leak(f.to_string().into_boxed_str()));
+        Self {
+            entries: HashMap::new(),
+            generation: 0,
+            family,
+            family_static,
+        }
     }
 
     pub fn set_family(&mut self, family: Option<String>) {
         if self.family != family {
-            self.family_static = family.as_deref().map(|f| &*Box::leak(f.to_string().into_boxed_str()));
+            self.family_static = family
+                .as_deref()
+                .map(|f| &*Box::leak(f.to_string().into_boxed_str()));
             self.family = family;
             self.entries.clear();
         }
@@ -93,9 +102,24 @@ impl TextCache {
         let family: Family<'static> = self.family();
         let entry = self.entries.entry(key).or_insert_with(|| {
             let mut buffer = Buffer::new(font_system, Metrics::new(spec.size, spec.line_height));
-            let width = if spec.wrap { Some(spec.bounds.w.max(1.0)) } else { None };
-            buffer.set_size(font_system, width, Some(spec.bounds.h.max(spec.line_height)));
-            buffer.set_wrap(font_system, if spec.wrap { Wrap::WordOrGlyph } else { Wrap::None });
+            let width = if spec.wrap {
+                Some(spec.bounds.w.max(1.0))
+            } else {
+                None
+            };
+            buffer.set_size(
+                font_system,
+                width,
+                Some(spec.bounds.h.max(spec.line_height)),
+            );
+            buffer.set_wrap(
+                font_system,
+                if spec.wrap {
+                    Wrap::WordOrGlyph
+                } else {
+                    Wrap::None
+                },
+            );
             let base = Attrs::new().family(family);
             let spans = spec.spans.iter().map(|s| {
                 let mut a = Attrs::new().family(family).color(to_color(s.color));
@@ -114,21 +138,34 @@ impl TextCache {
             };
             buffer.set_rich_text(font_system, spans, &base, Shaping::Advanced, align);
             buffer.shape_until_scroll(font_system, false);
-            Cached { buffer, last_used: gen }
+            Cached {
+                buffer,
+                last_used: gen,
+            }
         });
         entry.last_used = gen;
         key
     }
 
     /// Build the text area for a prepared spec.
-    pub fn area<'a>(&'a self, key: u64, spec: &TextSpec, scale: f32, physical: (u32, u32)) -> Option<TextArea<'a>> {
+    pub fn area<'a>(
+        &'a self,
+        key: u64,
+        spec: &TextSpec,
+        scale: f32,
+        physical: (u32, u32),
+    ) -> Option<TextArea<'a>> {
         let cached = self.entries.get(&key)?;
         let b = &spec.bounds;
         // For non-wrapping right/center aligned text we shaped without a width; position it
         // by measuring the run width so alignment still works.
         let mut left = b.x;
         if !spec.wrap && spec.align != Align::Left {
-            let run_w = cached.buffer.layout_runs().map(|r| r.line_w).fold(0.0f32, f32::max);
+            let run_w = cached
+                .buffer
+                .layout_runs()
+                .map(|r| r.line_w)
+                .fold(0.0f32, f32::max);
             left = match spec.align {
                 Align::Right => b.x + b.w - run_w,
                 Align::Center => b.x + (b.w - run_w) / 2.0,
@@ -141,8 +178,20 @@ impl TextCache {
             right: ((b.x + b.w) * scale).ceil().min(physical.0 as f32) as i32,
             bottom: ((b.y + b.h) * scale).ceil().min(physical.1 as f32) as i32,
         };
-        let default_color = spec.spans.first().map(|s| to_color(s.color)).unwrap_or(Color::rgb(255, 255, 255));
-        Some(TextArea { buffer: &cached.buffer, left: left * scale, top: b.y * scale, scale, bounds, default_color, custom_glyphs: &[] })
+        let default_color = spec
+            .spans
+            .first()
+            .map(|s| to_color(s.color))
+            .unwrap_or(Color::rgb(255, 255, 255));
+        Some(TextArea {
+            buffer: &cached.buffer,
+            left: left * scale,
+            top: b.y * scale,
+            scale,
+            bounds,
+            default_color,
+            custom_glyphs: &[],
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -151,15 +200,30 @@ impl TextCache {
 }
 
 /// Measure the advance width and line height of a monospace cell at `size`.
-pub fn measure_mono(font_system: &mut FontSystem, family: Option<&str>, size: f32, line_height: f32) -> (f32, f32) {
+pub fn measure_mono(
+    font_system: &mut FontSystem,
+    family: Option<&str>,
+    size: f32,
+    line_height: f32,
+) -> (f32, f32) {
     let mut buffer = Buffer::new(font_system, Metrics::new(size, line_height));
     buffer.set_size(font_system, None, None);
     let fam = match family {
         Some(n) => Family::Name(n),
         None => Family::Monospace,
     };
-    buffer.set_text(font_system, "MMMMMMMMMM", &Attrs::new().family(fam), Shaping::Advanced, None);
+    buffer.set_text(
+        font_system,
+        "MMMMMMMMMM",
+        &Attrs::new().family(fam),
+        Shaping::Advanced,
+        None,
+    );
     buffer.shape_until_scroll(font_system, false);
-    let w = buffer.layout_runs().map(|r| r.line_w).fold(0.0f32, f32::max) / 10.0;
+    let w = buffer
+        .layout_runs()
+        .map(|r| r.line_w)
+        .fold(0.0f32, f32::max)
+        / 10.0;
     (if w > 0.0 { w } else { size * 0.6 }, line_height)
 }

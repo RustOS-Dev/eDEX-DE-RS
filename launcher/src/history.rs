@@ -16,14 +16,20 @@ pub struct LaunchHistory {
 
 impl LaunchHistory {
     pub fn load(path: PathBuf) -> Self {
-        let mut h: LaunchHistory = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let mut h: LaunchHistory = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         h.path = Some(path);
         h
     }
 
     pub fn record(&mut self, id: &str) {
         *self.counts.entry(id.to_string()).or_insert(0) += 1;
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         self.last.insert(id.to_string(), now);
         if let Some(path) = &self.path {
             if let Some(dir) = path.parent() {
@@ -39,7 +45,10 @@ impl LaunchHistory {
     pub fn boost(&self, id: &str) -> f32 {
         let count = *self.counts.get(id).unwrap_or(&0) as f32;
         let recency = self.last.get(id).map(|t| {
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let age_days = now.saturating_sub(*t) as f32 / 86_400.0;
             (1.0 - age_days / 30.0).clamp(0.0, 1.0)
         });

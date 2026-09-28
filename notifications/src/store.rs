@@ -69,7 +69,16 @@ pub struct NotificationStore {
 
 impl Default for NotificationStore {
     fn default() -> Self {
-        Self { active: Vec::new(), history: VecDeque::new(), dnd: false, muted_apps: Vec::new(), default_timeout: Duration::from_millis(5000), max_visible: 4, history_limit: 200, unread: 0 }
+        Self {
+            active: Vec::new(),
+            history: VecDeque::new(),
+            dnd: false,
+            muted_apps: Vec::new(),
+            default_timeout: Duration::from_millis(5000),
+            max_visible: 4,
+            history_limit: 200,
+            unread: 0,
+        }
     }
 }
 
@@ -78,11 +87,24 @@ impl NotificationStore {
     pub fn push(&mut self, mut n: Notification) -> bool {
         // Replace an existing notification with the same id.
         self.active.retain(|a| a.id != n.id);
-        n.wall_time = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let muted = self.muted_apps.iter().any(|m| m.eq_ignore_ascii_case(&n.app));
+        n.wall_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let muted = self
+            .muted_apps
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&n.app));
         let show = !muted && (!self.dnd || n.urgency == Urgency::Critical);
         if !n.transient {
-            self.history.push_front(HistoryEntry { id: n.id, app: n.app.clone(), summary: n.summary.clone(), body: n.body.clone(), urgency: n.urgency, time: n.wall_time });
+            self.history.push_front(HistoryEntry {
+                id: n.id,
+                app: n.app.clone(),
+                summary: n.summary.clone(),
+                body: n.body.clone(),
+                urgency: n.urgency,
+                time: n.wall_time,
+            });
             while self.history.len() > self.history_limit {
                 self.history.pop_back();
             }
@@ -92,7 +114,11 @@ impl NotificationStore {
             self.active.push(n);
             while self.active.len() > self.max_visible {
                 // Drop the oldest non-critical toast first.
-                if let Some(pos) = self.active.iter().position(|a| a.urgency != Urgency::Critical) {
+                if let Some(pos) = self
+                    .active
+                    .iter()
+                    .position(|a| a.urgency != Urgency::Critical)
+                {
                     self.active.remove(pos);
                 } else {
                     self.active.remove(0);
@@ -144,7 +170,11 @@ impl NotificationStore {
     }
 
     pub fn active_action(&self, id: u32, index: usize) -> Option<String> {
-        self.active.iter().find(|n| n.id == id).and_then(|n| n.actions.get(index)).map(|(k, _)| k.clone())
+        self.active
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| n.actions.get(index))
+            .map(|(k, _)| k.clone())
     }
 
     /// Persist the history to disk (JSON).
@@ -171,12 +201,29 @@ mod tests {
     use super::*;
 
     fn n(id: u32, app: &str, urgency: Urgency, timeout: Option<u32>) -> Notification {
-        Notification { id, app: app.into(), icon: String::new(), summary: "s".into(), body: "b".into(), actions: vec![], urgency, timeout_ms: timeout, progress: None, transient: false, desktop_entry: None, created: Instant::now(), wall_time: 0 }
+        Notification {
+            id,
+            app: app.into(),
+            icon: String::new(),
+            summary: "s".into(),
+            body: "b".into(),
+            actions: vec![],
+            urgency,
+            timeout_ms: timeout,
+            progress: None,
+            transient: false,
+            desktop_entry: None,
+            created: Instant::now(),
+            wall_time: 0,
+        }
     }
 
     #[test]
     fn dnd_mute_and_expiry_policy() {
-        let mut s = NotificationStore { default_timeout: Duration::from_millis(10), ..Default::default() };
+        let mut s = NotificationStore {
+            default_timeout: Duration::from_millis(10),
+            ..Default::default()
+        };
         assert!(s.push(n(1, "a", Urgency::Normal, None)));
         s.dnd = true;
         assert!(!s.push(n(2, "a", Urgency::Normal, None)));

@@ -12,7 +12,8 @@ use anyhow::{Context, Result};
 use crate::proto::{Request, Response};
 
 pub fn send(path: &Path, request: &Request) -> Result<Response> {
-    let mut stream = UnixStream::connect(path).with_context(|| format!("edex-de is not running (no socket at {})", path.display()))?;
+    let mut stream = UnixStream::connect(path)
+        .with_context(|| format!("edex-de is not running (no socket at {})", path.display()))?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut line = serde_json::to_string(request)?;
     line.push('\n');

@@ -49,7 +49,11 @@ impl RectPipeline {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/rect.wgsl"));
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("edex rect screen uniform"),
-            contents: bytemuck::bytes_of(&Screen { size: [1.0, 1.0], scale: 1.0, srgb: 0.0 }),
+            contents: bytemuck::bytes_of(&Screen {
+                size: [1.0, 1.0],
+                scale: 1.0,
+                srgb: 0.0,
+            }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -68,7 +72,10 @@ impl RectPipeline {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("edex rect bg"),
             layout: &layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("edex rect pl"),
@@ -99,7 +106,10 @@ impl RectPipeline {
                 })],
                 compilation_options: Default::default(),
             }),
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
@@ -107,7 +117,15 @@ impl RectPipeline {
         });
         let capacity = 1024;
         let instances = Self::make_buffer(device, capacity);
-        Self { pipeline, uniform, bind_group, instances, capacity, count: 0, staging: Vec::new() }
+        Self {
+            pipeline,
+            uniform,
+            bind_group,
+            instances,
+            capacity,
+            count: 0,
+            staging: Vec::new(),
+        }
     }
 
     fn make_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -120,14 +138,31 @@ impl RectPipeline {
     }
 
     /// Upload this frame's rectangles; the instance buffer only grows.
-    pub fn upload(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene, scale: f32, srgb: bool) {
+    pub fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &Scene,
+        scale: f32,
+        srgb: bool,
+    ) {
         queue.write_buffer(
             &self.uniform,
             0,
-            bytemuck::bytes_of(&Screen { size: [scene.width, scene.height], scale, srgb: if srgb { 1.0 } else { 0.0 } }),
+            bytemuck::bytes_of(&Screen {
+                size: [scene.width, scene.height],
+                scale,
+                srgb: if srgb { 1.0 } else { 0.0 },
+            }),
         );
         self.staging.clear();
-        self.staging.extend(scene.rects.iter().filter(|r| r.rect.w > 0.0 && r.rect.h > 0.0).map(GpuRect::from));
+        self.staging.extend(
+            scene
+                .rects
+                .iter()
+                .filter(|r| r.rect.w > 0.0 && r.rect.h > 0.0)
+                .map(GpuRect::from),
+        );
         if self.staging.len() > self.capacity {
             self.capacity = self.staging.len().next_power_of_two();
             self.instances = Self::make_buffer(device, self.capacity);
@@ -173,7 +208,12 @@ impl ScanlinePipeline {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/scanline.wgsl"));
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("edex scanline uniform"),
-            contents: bytemuck::bytes_of(&ScanParams { size: [1.0, 1.0], scale: 1.0, intensity: 0.0, color: [0.0; 4] }),
+            contents: bytemuck::bytes_of(&ScanParams {
+                size: [1.0, 1.0],
+                scale: 1.0,
+                intensity: 0.0,
+                color: [0.0; 4],
+            }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -181,14 +221,21 @@ impl ScanlinePipeline {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
                 count: None,
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("edex scanline bg"),
             layout: &layout,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() }],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("edex scanline pl"),
@@ -198,20 +245,36 @@ impl ScanlinePipeline {
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("edex scanline pipeline"),
             layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_main"), buffers: &[], compilation_options: Default::default() },
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
                 compilation_options: Default::default(),
             }),
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
         });
-        Self { pipeline, uniform, bind_group }
+        Self {
+            pipeline,
+            uniform,
+            bind_group,
+        }
     }
 
     pub fn update(&self, queue: &wgpu::Queue, params: ScanParams) {

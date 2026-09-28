@@ -18,7 +18,16 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Self { theme: "tron".into(), font: "JetBrainsMono Nerd Font".into(), font_size: 14.0, border_glow: 0.8, scanlines: true, animations: true, keyboard_visible: true, boot_animation: true }
+        Self {
+            theme: "tron".into(),
+            font: "JetBrainsMono Nerd Font".into(),
+            font_size: 14.0,
+            border_glow: 0.8,
+            scanlines: true,
+            animations: true,
+            keyboard_visible: true,
+            boot_animation: true,
+        }
     }
 }
 
@@ -32,7 +41,11 @@ pub struct Layout {
 
 impl Default for Layout {
     fn default() -> Self {
-        Self { fs_split: 0.20, sysinfo_split: 0.78, reserve_side_panels: true }
+        Self {
+            fs_split: 0.20,
+            sysinfo_split: 0.78,
+            reserve_side_panels: true,
+        }
     }
 }
 
@@ -53,7 +66,15 @@ pub struct Terminal {
 
 impl Default for Terminal {
     fn default() -> Self {
-        Self { shell: String::new(), scrollback: 10_000, font_size: 13.0, cursor: "block".into(), cursor_blink: true, bell: "visual".into(), osc52_read: false }
+        Self {
+            shell: String::new(),
+            scrollback: 10_000,
+            font_size: 13.0,
+            cursor: "block".into(),
+            cursor_blink: true,
+            bell: "visual".into(),
+            osc52_read: false,
+        }
     }
 }
 
@@ -66,7 +87,10 @@ pub struct Launcher {
 
 impl Default for Launcher {
     fn default() -> Self {
-        Self { show_hidden: false, terminal_command: "kitty -e".into() }
+        Self {
+            show_hidden: false,
+            terminal_command: "kitty -e".into(),
+        }
     }
 }
 
@@ -83,7 +107,13 @@ pub struct Notifications {
 
 impl Default for Notifications {
     fn default() -> Self {
-        Self { dnd: false, timeout_ms: 5000, position: "top-right".into(), max_visible: 4, muted_apps: Vec::new() }
+        Self {
+            dnd: false,
+            timeout_ms: 5000,
+            position: "top-right".into(),
+            max_visible: 4,
+            muted_apps: Vec::new(),
+        }
     }
 }
 
@@ -103,7 +133,16 @@ pub struct Wm {
 
 impl Default for Wm {
     fn default() -> Self {
-        Self { gaps_in: 4, gaps_out: 8, border: 2, layout: "dwindle".into(), workspaces: 9, animations: true, blur: false, rounding: 0 }
+        Self {
+            gaps_in: 4,
+            gaps_out: 8,
+            border: 2,
+            layout: "dwindle".into(),
+            workspaces: 9,
+            animations: true,
+            blur: false,
+            rounding: 0,
+        }
     }
 }
 
@@ -122,7 +161,16 @@ pub struct Input {
 
 impl Default for Input {
     fn default() -> Self {
-        Self { kb_layout: "us".into(), kb_variant: String::new(), kb_options: String::new(), repeat_rate: 30, repeat_delay: 300, natural_scroll: true, tap_to_click: true, sensitivity: 0.0 }
+        Self {
+            kb_layout: "us".into(),
+            kb_variant: String::new(),
+            kb_options: String::new(),
+            repeat_rate: 30,
+            repeat_delay: 300,
+            natural_scroll: true,
+            tap_to_click: true,
+            sensitivity: 0.0,
+        }
     }
 }
 
@@ -140,7 +188,14 @@ pub struct Monitor {
 
 impl Default for Monitor {
     fn default() -> Self {
-        Self { name: String::new(), mode: "preferred".into(), position: "auto".into(), scale: 1.0, transform: 0, disabled: false }
+        Self {
+            name: String::new(),
+            mode: "preferred".into(),
+            position: "auto".into(),
+            scale: 1.0,
+            transform: 0,
+            disabled: false,
+        }
     }
 }
 
@@ -154,7 +209,11 @@ pub struct Display {
 
 impl Default for Display {
     fn default() -> Self {
-        Self { monitors: vec![Monitor::default()], night_light: false, night_temp: 4000 }
+        Self {
+            monitors: vec![Monitor::default()],
+            night_light: false,
+            night_temp: 4000,
+        }
     }
 }
 
@@ -174,7 +233,15 @@ pub struct Power {
 
 impl Default for Power {
     fn default() -> Self {
-        Self { dim_after: 300, lock_after: 600, dpms_after: 900, suspend_after: 0, profile: "balanced".into(), lid_close: "suspend".into(), lock_on_sleep: true }
+        Self {
+            dim_after: 300,
+            lock_after: 600,
+            dpms_after: 900,
+            suspend_after: 0,
+            profile: "balanced".into(),
+            lid_close: "suspend".into(),
+            lock_on_sleep: true,
+        }
     }
 }
 
@@ -188,7 +255,11 @@ pub struct Privacy {
 
 impl Default for Privacy {
     fn default() -> Self {
-        Self { tor_mode_on_login: false, tailscale_exit_node: String::new(), fingerprint_login: true }
+        Self {
+            tor_mode_on_login: false,
+            tailscale_exit_node: String::new(),
+            fingerprint_login: true,
+        }
     }
 }
 
@@ -235,12 +306,18 @@ impl Config {
             self.display.monitors.push(Monitor::default());
         }
         for m in &mut self.display.monitors {
-            m.scale = if m.scale <= 0.0 { 1.0 } else { m.scale.clamp(0.5, 4.0) };
+            m.scale = if m.scale <= 0.0 {
+                1.0
+            } else {
+                m.scale.clamp(0.5, 4.0)
+            };
         }
         if !["power-saver", "balanced", "performance"].contains(&self.power.profile.as_str()) {
             self.power.profile = "balanced".into();
         }
-        if !["suspend", "ignore", "lock", "poweroff", "hibernate"].contains(&self.power.lid_close.as_str()) {
+        if !["suspend", "ignore", "lock", "poweroff", "hibernate"]
+            .contains(&self.power.lid_close.as_str())
+        {
             self.power.lid_close = "suspend".into();
         }
         self.notifications.max_visible = self.notifications.max_visible.clamp(1, 10);
@@ -253,7 +330,8 @@ mod tests {
 
     #[test]
     fn partial_toml_merges_with_defaults() {
-        let c: Config = toml::from_str("[appearance]\ntheme = \"matrix\"\n[wm]\ngaps_in = 9\n").unwrap();
+        let c: Config =
+            toml::from_str("[appearance]\ntheme = \"matrix\"\n[wm]\ngaps_in = 9\n").unwrap();
         assert_eq!(c.appearance.theme, "matrix");
         assert_eq!(c.appearance.font_size, 14.0);
         assert_eq!(c.wm.gaps_in, 9);

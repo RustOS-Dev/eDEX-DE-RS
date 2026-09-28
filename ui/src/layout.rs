@@ -19,7 +19,13 @@ pub struct Metrics {
 
 impl Default for Metrics {
     fn default() -> Self {
-        Self { ui_font: 14.0, line: 20.0, cell_w: 8.4, cell_h: 18.0, term_font: 13.0 }
+        Self {
+            ui_font: 14.0,
+            line: 20.0,
+            cell_w: 8.4,
+            cell_h: 18.0,
+            term_font: 13.0,
+        }
     }
 }
 
@@ -34,7 +40,11 @@ pub struct LayoutConfig {
 
 impl Default for LayoutConfig {
     fn default() -> Self {
-        Self { fs_split: 0.20, sysinfo_split: 0.78, keyboard_visible: true }
+        Self {
+            fs_split: 0.20,
+            sysinfo_split: 0.78,
+            keyboard_visible: true,
+        }
     }
 }
 
@@ -64,7 +74,10 @@ impl PanelLayout {
         let top_h = (metrics.line * 2.0).round();
         let key_h = (metrics.line * 1.8).round().max(28.0);
         let keyboard_h = if cfg.keyboard_visible {
-            (KEYBOARD_ROWS as f32 * key_h + (KEYBOARD_ROWS as f32 - 1.0) * KEY_GAP + KEYBOARD_PAD * 2.0).round()
+            (KEYBOARD_ROWS as f32 * key_h
+                + (KEYBOARD_ROWS as f32 - 1.0) * KEY_GAP
+                + KEYBOARD_PAD * 2.0)
+                .round()
         } else {
             0.0
         };
@@ -78,7 +91,9 @@ impl PanelLayout {
         let fs_w = (width * cfg.fs_split).round().clamp(min_fs, max_fs);
         let min_sys_x = fs_w + min_term;
         let max_sys_x = (width - min_sys).max(min_sys_x);
-        let sys_x = (width * cfg.sysinfo_split).round().clamp(min_sys_x, max_sys_x);
+        let sys_x = (width * cfg.sysinfo_split)
+            .round()
+            .clamp(min_sys_x, max_sys_x);
 
         let handle_w = 6.0;
         Self {
@@ -128,7 +143,12 @@ mod tests {
     fn layout_snapshots() {
         let m = Metrics::default();
         let cfg = LayoutConfig::default();
-        for (w, h) in [(1280.0, 720.0), (1920.0, 1080.0), (2560.0, 1440.0), (3840.0, 2160.0)] {
+        for (w, h) in [
+            (1280.0, 720.0),
+            (1920.0, 1080.0),
+            (2560.0, 1440.0),
+            (3840.0, 2160.0),
+        ] {
             let l = PanelLayout::compute(w, h, &m, &cfg);
             insta::assert_debug_snapshot!(format!("layout_{}x{}", w as u32, h as u32), l);
         }
@@ -136,7 +156,12 @@ mod tests {
 
     #[test]
     fn panels_tile_the_full_area() {
-        let l = PanelLayout::compute(1920.0, 1080.0, &Metrics::default(), &LayoutConfig::default());
+        let l = PanelLayout::compute(
+            1920.0,
+            1080.0,
+            &Metrics::default(),
+            &LayoutConfig::default(),
+        );
         assert_eq!(l.filesystem.w + l.terminal.w + l.sysinfo.w, 1920.0);
         assert_eq!(l.filesystem.y, l.status_bar.h + l.top_bar.h);
         assert_eq!(l.filesystem.bottom(), l.keyboard.y);
@@ -149,7 +174,10 @@ mod tests {
 
     #[test]
     fn hidden_keyboard_frees_space() {
-        let cfg = LayoutConfig { keyboard_visible: false, ..Default::default() };
+        let cfg = LayoutConfig {
+            keyboard_visible: false,
+            ..Default::default()
+        };
         let l = PanelLayout::compute(1920.0, 1080.0, &Metrics::default(), &cfg);
         assert_eq!(l.keyboard.h, 0.0);
         assert_eq!(l.terminal.bottom(), 1080.0);

@@ -85,7 +85,12 @@ impl HyprState {
     pub fn apply(&mut self, event: &HyprEvent) -> bool {
         match event {
             HyprEvent::Workspace { id, name } => {
-                let id = id.or_else(|| self.workspaces.iter().find(|w| &w.name == name).map(|w| w.id));
+                let id = id.or_else(|| {
+                    self.workspaces
+                        .iter()
+                        .find(|w| &w.name == name)
+                        .map(|w| w.id)
+                });
                 if let Some(id) = id {
                     if let Some(mon) = self.monitors.iter_mut().find(|m| m.focused) {
                         mon.active_workspace = id;
@@ -107,12 +112,21 @@ impl HyprState {
                 false
             }
             HyprEvent::ActiveWindow { class, title } => {
-                self.active_window = if class.is_empty() && title.is_empty() { None } else { Some((class.clone(), title.clone())) };
+                self.active_window = if class.is_empty() && title.is_empty() {
+                    None
+                } else {
+                    Some((class.clone(), title.clone()))
+                };
                 false
             }
             HyprEvent::CreateWorkspace { id, name } => {
                 if !self.workspaces.iter().any(|w| &w.name == name) {
-                    let monitor = self.monitors.iter().find(|m| m.focused).map(|m| m.name.clone()).unwrap_or_default();
+                    let monitor = self
+                        .monitors
+                        .iter()
+                        .find(|m| m.focused)
+                        .map(|m| m.name.clone())
+                        .unwrap_or_default();
                     self.workspaces.push(WorkspaceInfo {
                         id: id.unwrap_or_else(|| name.parse().unwrap_or(0)),
                         name: name.clone(),
@@ -168,8 +182,15 @@ impl HyprState {
                 self.screencast_active = *active;
                 false
             }
-            HyprEvent::MonitorAdded(_) | HyprEvent::MonitorRemoved(_) | HyprEvent::ConfigReloaded | HyprEvent::Fullscreen(_) => true,
-            HyprEvent::WindowTitle { .. } | HyprEvent::OpenLayer(_) | HyprEvent::CloseLayer(_) | HyprEvent::Bell(_) | HyprEvent::Other { .. } => false,
+            HyprEvent::MonitorAdded(_)
+            | HyprEvent::MonitorRemoved(_)
+            | HyprEvent::ConfigReloaded
+            | HyprEvent::Fullscreen(_) => true,
+            HyprEvent::WindowTitle { .. }
+            | HyprEvent::OpenLayer(_)
+            | HyprEvent::CloseLayer(_)
+            | HyprEvent::Bell(_)
+            | HyprEvent::Other { .. } => false,
         }
     }
 
@@ -190,12 +211,22 @@ impl HyprState {
             .iter()
             .filter(|w| w.id > 0)
             .filter(|w| monitor.is_none_or(|n| w.monitor == n))
-            .map(|w| ui::state::WorkspaceInfo { id: w.id, name: w.name.clone(), active: active_ids.contains(&w.id), windows: w.windows })
+            .map(|w| ui::state::WorkspaceInfo {
+                id: w.id,
+                name: w.name.clone(),
+                active: active_ids.contains(&w.id),
+                windows: w.windows,
+            })
             .collect();
         // Always show 1..=5 so the strip is stable.
         for id in 1..=5 {
             if !strip.iter().any(|w| w.id == id) {
-                strip.push(ui::state::WorkspaceInfo { id, name: id.to_string(), active: active_ids.contains(&id), windows: 0 });
+                strip.push(ui::state::WorkspaceInfo {
+                    id,
+                    name: id.to_string(),
+                    active: active_ids.contains(&id),
+                    windows: 0,
+                });
             }
         }
         strip.sort_by_key(|w| w.id);
@@ -213,7 +244,13 @@ impl HyprState {
                 return l[start + 1..start + end].to_string();
             }
         }
-        l.split_whitespace().next().unwrap_or(l).chars().take(3).collect::<String>().to_ascii_uppercase()
+        l.split_whitespace()
+            .next()
+            .unwrap_or(l)
+            .chars()
+            .take(3)
+            .collect::<String>()
+            .to_ascii_uppercase()
     }
 }
 
@@ -223,7 +260,10 @@ mod tests {
 
     #[test]
     fn events_update_state() {
-        let mut st = HyprState { connected: true, ..Default::default() };
+        let mut st = HyprState {
+            connected: true,
+            ..Default::default()
+        };
         st.monitors.push(MonitorInfo {
             id: 0,
             name: "DP-1".into(),
@@ -242,15 +282,29 @@ mod tests {
             disabled: false,
             available_modes: vec![],
         });
-        assert!(!st.apply(&HyprEvent::CreateWorkspace { id: Some(2), name: "2".into() }));
-        assert!(!st.apply(&HyprEvent::Workspace { id: Some(2), name: "2".into() }));
+        assert!(!st.apply(&HyprEvent::CreateWorkspace {
+            id: Some(2),
+            name: "2".into()
+        }));
+        assert!(!st.apply(&HyprEvent::Workspace {
+            id: Some(2),
+            name: "2".into()
+        }));
         assert_eq!(st.monitors[0].active_workspace, 2);
-        assert!(!st.apply(&HyprEvent::OpenWindow { address: "a".into(), workspace: "2".into(), class: "kitty".into(), title: "t".into() }));
+        assert!(!st.apply(&HyprEvent::OpenWindow {
+            address: "a".into(),
+            workspace: "2".into(),
+            class: "kitty".into(),
+            title: "t".into()
+        }));
         assert_eq!(st.workspaces[0].windows, 1);
         let strip = st.workspace_strip(Some("DP-1"));
         assert_eq!(strip.len(), 5);
         assert!(strip.iter().find(|w| w.id == 2).unwrap().active);
-        st.apply(&HyprEvent::ActiveLayout { keyboard: "k".into(), layout: "English (US)".into() });
+        st.apply(&HyprEvent::ActiveLayout {
+            keyboard: "k".into(),
+            layout: "English (US)".into(),
+        });
         assert_eq!(st.short_layout(), "US");
         assert!(st.apply(&HyprEvent::ConfigReloaded));
     }

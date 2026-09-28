@@ -29,11 +29,21 @@ impl Rect {
     }
 
     pub fn inset(&self, d: f32) -> Rect {
-        Rect::new(self.x + d, self.y + d, (self.w - 2.0 * d).max(0.0), (self.h - 2.0 * d).max(0.0))
+        Rect::new(
+            self.x + d,
+            self.y + d,
+            (self.w - 2.0 * d).max(0.0),
+            (self.h - 2.0 * d).max(0.0),
+        )
     }
 
     pub fn inset_xy(&self, dx: f32, dy: f32) -> Rect {
-        Rect::new(self.x + dx, self.y + dy, (self.w - 2.0 * dx).max(0.0), (self.h - 2.0 * dy).max(0.0))
+        Rect::new(
+            self.x + dx,
+            self.y + dy,
+            (self.w - 2.0 * dx).max(0.0),
+            (self.h - 2.0 * dy).max(0.0),
+        )
     }
 
     /// Sub-rectangle at the top of this one.
@@ -47,11 +57,21 @@ impl Rect {
     }
 
     pub fn centered(&self, w: f32, h: f32) -> Rect {
-        Rect::new(self.x + (self.w - w) / 2.0, self.y + (self.h - h) / 2.0, w, h)
+        Rect::new(
+            self.x + (self.w - w) / 2.0,
+            self.y + (self.h - h) / 2.0,
+            w,
+            h,
+        )
     }
 
     pub fn round(&self) -> Rect {
-        Rect::new(self.x.round(), self.y.round(), self.w.round(), self.h.round())
+        Rect::new(
+            self.x.round(),
+            self.y.round(),
+            self.w.round(),
+            self.h.round(),
+        )
     }
 
     pub fn is_empty(&self) -> bool {
@@ -93,7 +113,12 @@ pub fn parse_color(hex: &str) -> Option<Color> {
         ),
         _ => return None,
     };
-    Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0])
+    Some([
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+        a as f32 / 255.0,
+    ])
 }
 
 pub fn format_color(c: Color) -> String {
@@ -112,7 +137,10 @@ mod tests {
     #[test]
     fn parses_hex_colors() {
         assert_eq!(parse_color("#00e5ff"), Some([0.0, 229.0 / 255.0, 1.0, 1.0]));
-        assert_eq!(parse_color("#ff000080").map(|c| (c[3] * 255.0).round() as u8), Some(128));
+        assert_eq!(
+            parse_color("#ff000080").map(|c| (c[3] * 255.0).round() as u8),
+            Some(128)
+        );
         assert_eq!(parse_color("nope"), None);
     }
 

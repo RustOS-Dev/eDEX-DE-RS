@@ -72,7 +72,10 @@ impl HitMap {
     }
 
     pub fn rect_of(&self, target: HitTarget) -> Option<Rect> {
-        self.entries.iter().find(|(_, t)| *t == target).map(|(r, _)| *r)
+        self.entries
+            .iter()
+            .find(|(_, t)| *t == target)
+            .map(|(r, _)| *r)
     }
 
     pub fn len(&self) -> usize {

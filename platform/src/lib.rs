@@ -237,7 +237,8 @@ pub struct Platform<E: 'static> {
 impl<E: 'static> Platform<E> {
     /// Connect to the Wayland display named by the environment and build the event loop.
     pub fn new() -> Result<(EventLoop<'static, Self>, Self)> {
-        let conn = Connection::connect_to_env().context("failed to connect to the Wayland display")?;
+        let conn =
+            Connection::connect_to_env().context("failed to connect to the Wayland display")?;
         let (globals, event_queue) =
             registry_queue_init::<Self>(&conn).context("failed to initialise the registry")?;
         let qh = event_queue.handle();
@@ -262,7 +263,9 @@ impl<E: 'static> Platform<E> {
         loop_handle
             .insert_source(internal_rx, |event, _, state: &mut Self| {
                 if let channel::Event::Msg(Internal::Paste { text, primary }) = event {
-                    state.events.push_back(PlatformEvent::Paste { text, primary });
+                    state
+                        .events
+                        .push_back(PlatformEvent::Paste { text, primary });
                 }
             })
             .map_err(|e| anyhow!("failed to insert internal channel: {e}"))?;
@@ -383,7 +386,11 @@ impl<E: 'static> Platform<E> {
     }
 
     /// Dispatch pending Wayland events and calloop sources, waiting up to `timeout`.
-    pub fn dispatch(&mut self, event_loop: &mut EventLoop<'static, Self>, timeout: Option<Duration>) -> Result<()> {
+    pub fn dispatch(
+        &mut self,
+        event_loop: &mut EventLoop<'static, Self>,
+        timeout: Option<Duration>,
+    ) -> Result<()> {
         self.conn.flush().context("wayland flush failed")?;
         event_loop
             .dispatch(timeout, self)
@@ -422,7 +429,11 @@ impl<E: 'static> Platform<E> {
         id
     }
 
-    fn attach_scale_helpers(&mut self, id: SurfaceId, wl_surface: &wl_surface::WlSurface) -> (Option<WpViewport>, Option<WpFractionalScaleV1>) {
+    fn attach_scale_helpers(
+        &mut self,
+        id: SurfaceId,
+        wl_surface: &wl_surface::WlSurface,
+    ) -> (Option<WpViewport>, Option<WpFractionalScaleV1>) {
         let viewport = self
             .viewporter
             .as_ref()
@@ -486,14 +497,23 @@ impl<E: 'static> Platform<E> {
     }
 
     /// Create an xdg-toplevel window (fullscreen by default; used by the greeter).
-    pub fn create_window(&mut self, title: &str, app_id: &str, fullscreen: bool) -> Result<SurfaceId> {
+    pub fn create_window(
+        &mut self,
+        title: &str,
+        app_id: &str,
+        fullscreen: bool,
+    ) -> Result<SurfaceId> {
         let id = self.alloc_id();
         let xdg = self
             .xdg_shell
             .as_ref()
             .ok_or_else(|| anyhow!("compositor does not support xdg_wm_base"))?;
         let wl_surface = self.compositor.create_surface(&self.qh);
-        let window = xdg.create_window(wl_surface.clone(), WindowDecorations::RequestServer, &self.qh);
+        let window = xdg.create_window(
+            wl_surface.clone(),
+            WindowDecorations::RequestServer,
+            &self.qh,
+        );
         window.set_title(title);
         window.set_app_id(app_id);
         window.set_min_size(Some((640, 480)));
@@ -562,12 +582,18 @@ impl<E: 'static> Platform<E> {
     }
 
     pub fn is_configured(&self, id: SurfaceId) -> bool {
-        self.surfaces.get(&id).map(|e| e.configured).unwrap_or(false)
+        self.surfaces
+            .get(&id)
+            .map(|e| e.configured)
+            .unwrap_or(false)
     }
 
     /// Logical size of a configured surface.
     pub fn logical_size(&self, id: SurfaceId) -> Option<(u32, u32)> {
-        self.surfaces.get(&id).filter(|e| e.configured).map(|e| e.logical_size)
+        self.surfaces
+            .get(&id)
+            .filter(|e| e.configured)
+            .map(|e| e.logical_size)
     }
 
     pub fn scale(&self, id: SurfaceId) -> f64 {
@@ -576,7 +602,10 @@ impl<E: 'static> Platform<E> {
 
     /// Pixel size the swapchain should have for this surface.
     pub fn buffer_size(&self, id: SurfaceId) -> Option<(u32, u32)> {
-        self.surfaces.get(&id).filter(|e| e.configured).map(|e| e.buffer_size())
+        self.surfaces
+            .get(&id)
+            .filter(|e| e.configured)
+            .map(|e| e.buffer_size())
     }
 
     /// Update the requested size of a layer surface (reservers use this when panels resize).
@@ -600,8 +629,12 @@ impl<E: 'static> Platform<E> {
 
     /// Resize a reserver: both the requested size on its axis and its exclusive zone.
     pub fn set_reserver_size(&mut self, id: SurfaceId, size: u32) {
-        let Some(entry) = self.surfaces.get_mut(&id) else { return };
-        let SurfaceRole::Reserver(edge) = entry.role else { return };
+        let Some(entry) = self.surfaces.get_mut(&id) else {
+            return;
+        };
+        let SurfaceRole::Reserver(edge) = entry.role else {
+            return;
+        };
         if let SurfaceKind::Layer(layer) = &entry.kind {
             match edge {
                 Edge::Top | Edge::Bottom => layer.set_size(0, size),
@@ -633,7 +666,9 @@ impl<E: 'static> Platform<E> {
     /// Request a frame callback for the surface. Must be called before the commit that
     /// presents the next frame (wgpu's present performs that commit).
     pub fn request_frame(&mut self, id: SurfaceId) -> bool {
-        let Some(entry) = self.surfaces.get_mut(&id) else { return false };
+        let Some(entry) = self.surfaces.get_mut(&id) else {
+            return false;
+        };
         if entry.frame_pending || !entry.configured {
             return false;
         }
@@ -646,7 +681,10 @@ impl<E: 'static> Platform<E> {
 
     /// Whether a frame callback is outstanding for the surface.
     pub fn frame_pending(&self, id: SurfaceId) -> bool {
-        self.surfaces.get(&id).map(|e| e.frame_pending).unwrap_or(false)
+        self.surfaces
+            .get(&id)
+            .map(|e| e.frame_pending)
+            .unwrap_or(false)
     }
 
     /// Commit the surface without a new buffer (used after `request_frame` when nothing
@@ -659,7 +697,10 @@ impl<E: 'static> Platform<E> {
 
     /// Raw handles for creating a GPU surface.
     pub fn raw_handles(&self, id: SurfaceId) -> Result<(RawDisplayHandle, RawWindowHandle)> {
-        let entry = self.surfaces.get(&id).ok_or_else(|| anyhow!("unknown surface {id:?}"))?;
+        let entry = self
+            .surfaces
+            .get(&id)
+            .ok_or_else(|| anyhow!("unknown surface {id:?}"))?;
         let display = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(
             NonNull::new(self.conn.backend().display_ptr().cast())
                 .ok_or_else(|| anyhow!("null wayland display pointer"))?,
@@ -673,7 +714,9 @@ impl<E: 'static> Platform<E> {
 
     /// Present a reserver: attach its 1x1 buffer scaled to the configured size.
     fn present_reserver(&mut self, id: SurfaceId) {
-        let Some(entry) = self.surfaces.get_mut(&id) else { return };
+        let Some(entry) = self.surfaces.get_mut(&id) else {
+            return;
+        };
         let (w, h) = entry.logical_size;
         if w == 0 || h == 0 {
             return;
@@ -737,8 +780,12 @@ impl<E: 'static> Platform<E> {
     /// Ask for the current clipboard text; delivered later as `PlatformEvent::Paste`.
     pub fn request_paste(&mut self) {
         for seat in &self.seats {
-            let Some(device) = &seat.data_device else { continue };
-            let Some(offer) = device.data().selection_offer() else { continue };
+            let Some(device) = &seat.data_device else {
+                continue;
+            };
+            let Some(offer) = device.data().selection_offer() else {
+                continue;
+            };
             let mime = offer.with_mime_types(|mimes| {
                 if mimes.iter().any(|m| m == TEXT_MIME) {
                     Some(TEXT_MIME.to_string())
@@ -758,7 +805,10 @@ impl<E: 'static> Platform<E> {
                         let mut buf = Vec::new();
                         if pipe.read_to_end(&mut buf).is_ok() {
                             let text = String::from_utf8_lossy(&buf).into_owned();
-                            let _ = tx.send(Internal::Paste { text, primary: false });
+                            let _ = tx.send(Internal::Paste {
+                                text,
+                                primary: false,
+                            });
                         }
                     });
                 }
@@ -772,7 +822,12 @@ impl<E: 'static> Platform<E> {
         self.by_wl.get(&wl.id()).copied()
     }
 
-    fn convert_key(event: &KeyEvent, modifiers: Modifiers, pressed: bool, repeat: bool) -> KeyInput {
+    fn convert_key(
+        event: &KeyEvent,
+        modifiers: Modifiers,
+        pressed: bool,
+        repeat: bool,
+    ) -> KeyInput {
         KeyInput {
             keysym: event.keysym.raw(),
             raw_code: event.raw_code,
@@ -791,7 +846,10 @@ impl<E: 'static> Platform<E> {
     }
 }
 
-fn convert_output_info(id: OutputId, info: &smithay_client_toolkit::output::OutputInfo) -> OutputInfo {
+fn convert_output_info(
+    id: OutputId,
+    info: &smithay_client_toolkit::output::OutputInfo,
+) -> OutputInfo {
     let current = info.modes.iter().find(|m| m.current);
     let logical_size = info.logical_size.unwrap_or_else(|| {
         current
@@ -829,8 +887,16 @@ fn convert_modifiers(m: &SctkModifiers) -> Modifiers {
 // ───────────────────────────── sctk handler implementations ─────────────────────────────
 
 impl<E: 'static> CompositorHandler for Platform<E> {
-    fn scale_factor_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, new_factor: i32) {
-        let Some(id) = self.surface_id(surface) else { return };
+    fn scale_factor_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
+    ) {
+        let Some(id) = self.surface_id(surface) else {
+            return;
+        };
         let mut changed = false;
         if let Some(entry) = self.surfaces.get_mut(&id) {
             if entry.int_scale != new_factor {
@@ -840,23 +906,53 @@ impl<E: 'static> CompositorHandler for Platform<E> {
         }
         if changed {
             let scale = self.scale(id);
-            self.events.push_back(PlatformEvent::ScaleChanged { surface: id, scale });
+            self.events
+                .push_back(PlatformEvent::ScaleChanged { surface: id, scale });
         }
     }
 
-    fn transform_changed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: wl_output::Transform) {}
+    fn transform_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: wl_output::Transform,
+    ) {
+    }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, surface: &wl_surface::WlSurface, _: u32) {
-        let Some(id) = self.surface_id(surface) else { return };
+    fn frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        let Some(id) = self.surface_id(surface) else {
+            return;
+        };
         if let Some(entry) = self.surfaces.get_mut(&id) {
             entry.frame_pending = false;
         }
         self.events.push_back(PlatformEvent::Frame { surface: id });
     }
 
-    fn surface_enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
 
-    fn surface_leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: &wl_output::WlOutput) {}
+    fn surface_leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
 }
 
 impl<E: 'static> OutputHandler for Platform<E> {
@@ -865,7 +961,9 @@ impl<E: 'static> OutputHandler for Platform<E> {
     }
 
     fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
-        let Some(info) = self.output_state.info(&output) else { return };
+        let Some(info) = self.output_state.info(&output) else {
+            return;
+        };
         let id = OutputId(info.id);
         self.outputs.insert(id, output);
         let info = convert_output_info(id, &info);
@@ -873,14 +971,27 @@ impl<E: 'static> OutputHandler for Platform<E> {
         self.events.push_back(PlatformEvent::OutputAdded(info));
     }
 
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
-        let Some(info) = self.output_state.info(&output) else { return };
+    fn update_output(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        let Some(info) = self.output_state.info(&output) else {
+            return;
+        };
         let id = OutputId(info.id);
         self.outputs.entry(id).or_insert(output);
-        self.events.push_back(PlatformEvent::OutputChanged(convert_output_info(id, &info)));
+        self.events
+            .push_back(PlatformEvent::OutputChanged(convert_output_info(id, &info)));
     }
 
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
         let id = self
             .outputs
             .iter()
@@ -902,8 +1013,17 @@ impl<E: 'static> LayerShellHandler for Platform<E> {
         }
     }
 
-    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface, configure: LayerSurfaceConfigure, _: u32) {
-        let Some(id) = self.surface_id(layer.wl_surface()) else { return };
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _: u32,
+    ) {
+        let Some(id) = self.surface_id(layer.wl_surface()) else {
+            return;
+        };
         let (mut width, mut height) = configure.new_size;
         let role;
         {
@@ -926,7 +1046,12 @@ impl<E: 'static> LayerShellHandler for Platform<E> {
             return;
         }
         let scale = self.scale(id);
-        self.events.push_back(PlatformEvent::Configure { surface: id, width, height, scale });
+        self.events.push_back(PlatformEvent::Configure {
+            surface: id,
+            width,
+            height,
+            scale,
+        });
     }
 }
 
@@ -937,12 +1062,29 @@ impl<E: 'static> WindowHandler for Platform<E> {
         }
     }
 
-    fn configure(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window, configure: WindowConfigure, _: u32) {
-        let Some(id) = self.surface_id(window.wl_surface()) else { return };
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        window: &Window,
+        configure: WindowConfigure,
+        _: u32,
+    ) {
+        let Some(id) = self.surface_id(window.wl_surface()) else {
+            return;
+        };
         {
             let entry = self.surfaces.get_mut(&id).expect("surface exists");
-            let width = configure.new_size.0.map(|w| w.get()).unwrap_or(entry.logical_size.0.max(1));
-            let height = configure.new_size.1.map(|h| h.get()).unwrap_or(entry.logical_size.1.max(1));
+            let width = configure
+                .new_size
+                .0
+                .map(|w| w.get())
+                .unwrap_or(entry.logical_size.0.max(1));
+            let height = configure
+                .new_size
+                .1
+                .map(|h| h.get())
+                .unwrap_or(entry.logical_size.1.max(1));
             entry.logical_size = (width, height);
             entry.configured = true;
             if let Some(viewport) = &entry.viewport {
@@ -951,7 +1093,12 @@ impl<E: 'static> WindowHandler for Platform<E> {
         }
         let (width, height) = self.surfaces[&id].logical_size;
         let scale = self.scale(id);
-        self.events.push_back(PlatformEvent::Configure { surface: id, width, height, scale });
+        self.events.push_back(PlatformEvent::Configure {
+            surface: id,
+            width,
+            height,
+            scale,
+        });
     }
 }
 
@@ -965,12 +1112,26 @@ impl<E: 'static> SeatHandler for Platform<E> {
             .data_device_manager
             .as_ref()
             .map(|m| m.get_data_device(qh, &seat));
-        self.seats.push(SeatEntry { seat, keyboard: None, pointer: None, data_device, last_serial: 0 });
+        self.seats.push(SeatEntry {
+            seat,
+            keyboard: None,
+            pointer: None,
+            data_device,
+            last_serial: 0,
+        });
     }
 
-    fn new_capability(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
         let loop_handle = self.loop_handle.clone();
-        let Some(entry) = self.seats.iter_mut().find(|s| s.seat == seat) else { return };
+        let Some(entry) = self.seats.iter_mut().find(|s| s.seat == seat) else {
+            return;
+        };
         match capability {
             Capability::Keyboard if entry.keyboard.is_none() => {
                 match self.seat_state.get_keyboard_with_repeat(
@@ -986,7 +1147,13 @@ impl<E: 'static> SeatHandler for Platform<E> {
             }
             Capability::Pointer if entry.pointer.is_none() => {
                 let surface = self.compositor.create_surface(qh);
-                match self.seat_state.get_pointer_with_theme::<Self, ()>(qh, &seat, self.shm.wl_shm(), surface, ThemeSpec::default()) {
+                match self.seat_state.get_pointer_with_theme::<Self, ()>(
+                    qh,
+                    &seat,
+                    self.shm.wl_shm(),
+                    surface,
+                    ThemeSpec::default(),
+                ) {
                     Ok(p) => entry.pointer = Some(p),
                     Err(e) => warn!("failed to create pointer: {e}"),
                 }
@@ -995,8 +1162,16 @@ impl<E: 'static> SeatHandler for Platform<E> {
         }
     }
 
-    fn remove_capability(&mut self, _: &Connection, _: &QueueHandle<Self>, seat: wl_seat::WlSeat, capability: Capability) {
-        let Some(entry) = self.seats.iter_mut().find(|s| s.seat == seat) else { return };
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        let Some(entry) = self.seats.iter_mut().find(|s| s.seat == seat) else {
+            return;
+        };
         match capability {
             Capability::Keyboard => {
                 if let Some(k) = entry.keyboard.take() {
@@ -1016,43 +1191,92 @@ impl<E: 'static> SeatHandler for Platform<E> {
 }
 
 impl<E: 'static> KeyboardHandler for Platform<E> {
-    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, serial: u32, _: &[u32], _: &[Keysym]) {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        surface: &wl_surface::WlSurface,
+        serial: u32,
+        _: &[u32],
+        _: &[Keysym],
+    ) {
         self.note_serial(serial);
         if let Some(id) = self.surface_id(surface) {
             self.keyboard_focus = Some(id);
-            self.events.push_back(PlatformEvent::KeyboardEnter { surface: id });
+            self.events
+                .push_back(PlatformEvent::KeyboardEnter { surface: id });
         }
     }
 
-    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, surface: &wl_surface::WlSurface, serial: u32) {
+    fn leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        surface: &wl_surface::WlSurface,
+        serial: u32,
+    ) {
         self.note_serial(serial);
         if let Some(id) = self.surface_id(surface) {
             if self.keyboard_focus == Some(id) {
                 self.keyboard_focus = None;
             }
-            self.events.push_back(PlatformEvent::KeyboardLeave { surface: id });
+            self.events
+                .push_back(PlatformEvent::KeyboardLeave { surface: id });
         }
     }
 
-    fn press_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, serial: u32, event: KeyEvent) {
+    fn press_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        serial: u32,
+        event: KeyEvent,
+    ) {
         self.note_serial(serial);
         self.push_key(event, true, false);
     }
 
-    fn repeat_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, event: KeyEvent) {
+    fn repeat_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: u32,
+        event: KeyEvent,
+    ) {
         self.push_key(event, true, true);
     }
 
-    fn release_key(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, serial: u32, event: KeyEvent) {
+    fn release_key(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        serial: u32,
+        event: KeyEvent,
+    ) {
         self.note_serial(serial);
         self.push_key(event, false, false);
     }
 
-    fn update_modifiers(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_keyboard::WlKeyboard, _: u32, modifiers: SctkModifiers, _: RawModifiers, _: u32) {
+    fn update_modifiers(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        _: u32,
+        modifiers: SctkModifiers,
+        _: RawModifiers,
+        _: u32,
+    ) {
         let m = convert_modifiers(&modifiers);
         if m != self.modifiers {
             self.modifiers = m;
-            self.events.push_back(PlatformEvent::ModifiersChanged { modifiers: m });
+            self.events
+                .push_back(PlatformEvent::ModifiersChanged { modifiers: m });
         }
     }
 }
@@ -1066,41 +1290,74 @@ impl<E: 'static> Platform<E> {
 }
 
 impl<E: 'static> PointerHandler for Platform<E> {
-    fn pointer_frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_pointer::WlPointer, events: &[PointerEvent]) {
+    fn pointer_frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
         for event in events {
-            let Some(id) = self.surface_id(&event.surface) else { continue };
+            let Some(id) = self.surface_id(&event.surface) else {
+                continue;
+            };
             let (x, y) = event.position;
             match event.kind {
                 PointerEventKind::Enter { serial } => {
                     self.note_serial(serial);
                     self.pointer_focus = Some(id);
                     self.pointer_position = (x, y);
-                    self.events.push_back(PlatformEvent::PointerEnter { surface: id, x, y });
+                    self.events
+                        .push_back(PlatformEvent::PointerEnter { surface: id, x, y });
                 }
                 PointerEventKind::Leave { serial } => {
                     self.note_serial(serial);
                     if self.pointer_focus == Some(id) {
                         self.pointer_focus = None;
                     }
-                    self.events.push_back(PlatformEvent::PointerLeave { surface: id });
+                    self.events
+                        .push_back(PlatformEvent::PointerLeave { surface: id });
                 }
                 PointerEventKind::Motion { .. } => {
                     self.pointer_position = (x, y);
-                    self.events.push_back(PlatformEvent::PointerMotion { surface: id, x, y });
+                    self.events
+                        .push_back(PlatformEvent::PointerMotion { surface: id, x, y });
                 }
                 PointerEventKind::Press { button, serial, .. } => {
                     self.note_serial(serial);
-                    self.events.push_back(PlatformEvent::PointerButton { surface: id, button, pressed: true, x, y });
+                    self.events.push_back(PlatformEvent::PointerButton {
+                        surface: id,
+                        button,
+                        pressed: true,
+                        x,
+                        y,
+                    });
                 }
                 PointerEventKind::Release { button, serial, .. } => {
                     self.note_serial(serial);
-                    self.events.push_back(PlatformEvent::PointerButton { surface: id, button, pressed: false, x, y });
+                    self.events.push_back(PlatformEvent::PointerButton {
+                        surface: id,
+                        button,
+                        pressed: false,
+                        x,
+                        y,
+                    });
                 }
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                PointerEventKind::Axis {
+                    horizontal,
+                    vertical,
+                    ..
+                } => {
                     let dx = axis_value(&horizontal);
                     let dy = axis_value(&vertical);
                     if dx != 0.0 || dy != 0.0 {
-                        self.events.push_back(PlatformEvent::PointerAxis { surface: id, dx, dy, x, y });
+                        self.events.push_back(PlatformEvent::PointerAxis {
+                            surface: id,
+                            dx,
+                            dy,
+                            x,
+                            y,
+                        });
                     }
                 }
             }
@@ -1131,23 +1388,73 @@ impl<E: 'static> ShmHandler for Platform<E> {
 }
 
 impl<E: 'static> DataDeviceHandler for Platform<E> {
-    fn enter(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _x: f64, _y: f64, _: &wl_surface::WlSurface) {}
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _x: f64,
+        _y: f64,
+        _: &wl_surface::WlSurface,
+    ) {
+    }
     fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
-    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _x: f64, _y: f64) {}
+    fn motion(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _x: f64,
+        _y: f64,
+    ) {
+    }
     fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
     fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
 }
 
 impl<E: 'static> DataOfferHandler for Platform<E> {
-    fn source_actions(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
-    fn selected_action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &mut DragOffer, _: DndAction) {}
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
 }
 
 impl<E: 'static> DataSourceHandler for Platform<E> {
-    fn accept_mime(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: Option<String>) {}
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: Option<String>,
+    ) {
+    }
 
-    fn send_request(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource, _mime: String, mut fd: WritePipe) {
-        if self.copy_source.as_ref().map(|s| s.inner() == source).unwrap_or(false) {
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        source: &WlDataSource,
+        _mime: String,
+        mut fd: WritePipe,
+    ) {
+        if self
+            .copy_source
+            .as_ref()
+            .map(|s| s.inner() == source)
+            .unwrap_or(false)
+        {
             let text = self.copy_text.clone();
             std::thread::spawn(move || {
                 let _ = fd.write_all(text.as_bytes());
@@ -1157,7 +1464,12 @@ impl<E: 'static> DataSourceHandler for Platform<E> {
     }
 
     fn cancelled(&mut self, _: &Connection, _: &QueueHandle<Self>, source: &WlDataSource) {
-        if self.copy_source.as_ref().map(|s| s.inner() == source).unwrap_or(false) {
+        if self
+            .copy_source
+            .as_ref()
+            .map(|s| s.inner() == source)
+            .unwrap_or(false)
+        {
             self.copy_source = None;
             self.copy_text.clear();
         }
@@ -1187,11 +1499,15 @@ mod tests {
     fn reserver_specs_anchor_correct_edges() {
         let top = LayerSpec::reserver(OutputId(1), Edge::Top, 40);
         assert_eq!(top.size, (0, 40));
-        assert!(top.anchor.contains(Anchor::TOP | Anchor::LEFT | Anchor::RIGHT));
+        assert!(top
+            .anchor
+            .contains(Anchor::TOP | Anchor::LEFT | Anchor::RIGHT));
         assert_eq!(top.exclusive_zone, 40);
         let left = LayerSpec::reserver(OutputId(1), Edge::Left, 300);
         assert_eq!(left.size, (300, 0));
-        assert!(left.anchor.contains(Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM));
+        assert!(left
+            .anchor
+            .contains(Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM));
         assert!(!left.accepts_input);
     }
 
@@ -1203,7 +1519,10 @@ mod tests {
             _ => 2.0,
         };
         assert!((scale - 1.5).abs() < f64::EPSILON);
-        let (w, h) = ((1920f64 * scale).round() as u32, (1080f64 * scale).round() as u32);
+        let (w, h) = (
+            (1920f64 * scale).round() as u32,
+            (1080f64 * scale).round() as u32,
+        );
         assert_eq!((w, h), (2880, 1620));
     }
 

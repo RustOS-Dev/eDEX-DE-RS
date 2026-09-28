@@ -47,7 +47,12 @@ fn csi_or_ss3(final_byte: u8, mods: Modifiers, app: bool, csi_number: Option<u8>
 
 /// Encode a key into PTY bytes. Returns `None` for keys that produce no input
 /// (bare modifiers, unhandled specials).
-pub fn key_to_bytes(keysym: u32, text: Option<&str>, mods: Modifiers, modes: KeyModes) -> Option<Vec<u8>> {
+pub fn key_to_bytes(
+    keysym: u32,
+    text: Option<&str>,
+    mods: Modifiers,
+    modes: KeyModes,
+) -> Option<Vec<u8>> {
     let app = modes.app_cursor;
     let bytes = match keysym {
         KEY_Return | KEY_KP_Enter | KEY_ISO_Enter => {
@@ -133,7 +138,9 @@ fn ctrl_bytes(keysym: u32, text: Option<&str>) -> Option<Vec<u8>> {
             if upper.is_ascii_uppercase() {
                 (upper as u8) & 0x1f
             } else {
-                return text.map(|t| t.as_bytes().to_vec()).filter(|t| !t.is_empty());
+                return text
+                    .map(|t| t.as_bytes().to_vec())
+                    .filter(|t| !t.is_empty());
             }
         }
     };
@@ -168,25 +175,83 @@ mod tests {
     #[test]
     fn maps_basic_keys() {
         let m = Modifiers::default();
-        assert_eq!(key_to_bytes(KEY_Return, None, m, KeyModes::default()), Some(b"\r".to_vec()));
-        assert_eq!(key_to_bytes(KEY_c, Some("c"), Modifiers { ctrl: true, ..m }, KeyModes::default()), Some(vec![0x03]));
-        assert_eq!(key_to_bytes(KEY_a, Some("a"), m, KeyModes::default()), Some(b"a".to_vec()));
-        assert_eq!(key_to_bytes(KEY_a, Some("a"), Modifiers { alt: true, ..m }, KeyModes::default()), Some(b"\x1ba".to_vec()));
+        assert_eq!(
+            key_to_bytes(KEY_Return, None, m, KeyModes::default()),
+            Some(b"\r".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(
+                KEY_c,
+                Some("c"),
+                Modifiers { ctrl: true, ..m },
+                KeyModes::default()
+            ),
+            Some(vec![0x03])
+        );
+        assert_eq!(
+            key_to_bytes(KEY_a, Some("a"), m, KeyModes::default()),
+            Some(b"a".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(
+                KEY_a,
+                Some("a"),
+                Modifiers { alt: true, ..m },
+                KeyModes::default()
+            ),
+            Some(b"\x1ba".to_vec())
+        );
     }
 
     #[test]
     fn arrows_respect_application_mode_and_modifiers() {
         let m = Modifiers::default();
-        assert_eq!(key_to_bytes(KEY_Up, None, m, KeyModes::default()), Some(b"\x1b[A".to_vec()));
-        assert_eq!(key_to_bytes(KEY_Up, None, m, KeyModes { app_cursor: true, app_keypad: false }), Some(b"\x1bOA".to_vec()));
-        assert_eq!(key_to_bytes(KEY_Up, None, Modifiers { ctrl: true, ..m }, KeyModes::default()), Some(b"\x1b[1;5A".to_vec()));
-        assert_eq!(key_to_bytes(KEY_Delete, None, Modifiers { shift: true, ..m }, KeyModes::default()), Some(b"\x1b[3;2~".to_vec()));
-        assert_eq!(key_to_bytes(KEY_F5, None, m, KeyModes::default()), Some(b"\x1b[15~".to_vec()));
+        assert_eq!(
+            key_to_bytes(KEY_Up, None, m, KeyModes::default()),
+            Some(b"\x1b[A".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(
+                KEY_Up,
+                None,
+                m,
+                KeyModes {
+                    app_cursor: true,
+                    app_keypad: false
+                }
+            ),
+            Some(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(
+                KEY_Up,
+                None,
+                Modifiers { ctrl: true, ..m },
+                KeyModes::default()
+            ),
+            Some(b"\x1b[1;5A".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(
+                KEY_Delete,
+                None,
+                Modifiers { shift: true, ..m },
+                KeyModes::default()
+            ),
+            Some(b"\x1b[3;2~".to_vec())
+        );
+        assert_eq!(
+            key_to_bytes(KEY_F5, None, m, KeyModes::default()),
+            Some(b"\x1b[15~".to_vec())
+        );
     }
 
     #[test]
     fn paste_is_bracketed_and_sanitised() {
         assert_eq!(encode_paste("a\nb", false), b"a\rb".to_vec());
-        assert_eq!(encode_paste("x\x1b[201~y", true), b"\x1b[200~xy\x1b[201~".to_vec());
+        assert_eq!(
+            encode_paste("x\x1b[201~y", true),
+            b"\x1b[200~xy\x1b[201~".to_vec()
+        );
     }
 }

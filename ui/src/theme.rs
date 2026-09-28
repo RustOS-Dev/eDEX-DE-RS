@@ -82,7 +82,8 @@ pub struct ThemeConfig {
 }
 
 fn color(field: &str, value: &str) -> Result<Color> {
-    parse_color(value).ok_or_else(|| anyhow!("theme field `{field}` is not a #rrggbb colour: {value}"))
+    parse_color(value)
+        .ok_or_else(|| anyhow!("theme field `{field}` is not a #rrggbb colour: {value}"))
 }
 
 fn opt_color(field: &str, value: &Option<String>, fallback: Color) -> Result<Color> {
@@ -106,7 +107,12 @@ impl ThemeConfig {
         let accent = color("accent", &self.accent)?;
         let mut palette = [background; 16];
         for (i, slot) in palette.iter_mut().enumerate() {
-            let value = self.terminal.palette.get(i).map(String::as_str).unwrap_or(DEFAULT_PALETTE[i]);
+            let value = self
+                .terminal
+                .palette
+                .get(i)
+                .map(String::as_str)
+                .unwrap_or(DEFAULT_PALETTE[i]);
             *slot = color("terminal.palette", value)?;
         }
         Ok(Theme {
@@ -126,9 +132,21 @@ impl ThemeConfig {
             terminal_fg: opt_color("terminal.fg", &self.terminal.fg, text_primary)?,
             terminal_bg: opt_color("terminal.bg", &self.terminal.bg, background)?,
             palette,
-            key_fill: opt_color("keyboard.key", &self.keyboard.key, mix(background, border, 0.12))?,
-            key_active: opt_color("keyboard.key_active", &self.keyboard.key_active, with_alpha(border, 0.85))?,
-            key_border: opt_color("keyboard.key_border", &self.keyboard.key_border, with_alpha(border, 0.6))?,
+            key_fill: opt_color(
+                "keyboard.key",
+                &self.keyboard.key,
+                mix(background, border, 0.12),
+            )?,
+            key_active: opt_color(
+                "keyboard.key_active",
+                &self.keyboard.key_active,
+                with_alpha(border, 0.85),
+            )?,
+            key_border: opt_color(
+                "keyboard.key_border",
+                &self.keyboard.key_border,
+                with_alpha(border, 0.6),
+            )?,
             glow: self.glow.unwrap_or(0.8).clamp(0.0, 1.0),
         })
     }
@@ -157,8 +175,14 @@ pub fn load_themes(dirs: &[&Path]) -> BTreeMap<String, Theme> {
     let tron = builtin_tron();
     themes.insert(tron.name.to_ascii_lowercase(), tron);
     for dir in dirs {
-        let Ok(entries) = fs::read_dir(dir) else { continue };
-        let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml")).collect();
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        let mut paths: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
         paths.sort();
         for path in paths {
             match load_theme_file(&path) {

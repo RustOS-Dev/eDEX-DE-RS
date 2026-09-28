@@ -84,7 +84,10 @@ impl SysmonCollector {
     /// every 10th call.
     pub fn refresh(&mut self) {
         let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refresh).as_secs_f32().max(0.05);
+        let elapsed = now
+            .duration_since(self.last_refresh)
+            .as_secs_f32()
+            .max(0.05);
         self.last_refresh = now;
         self.ticks += 1;
 
@@ -98,18 +101,38 @@ impl SysmonCollector {
         }
 
         let cpu_usage: Vec<f32> = self.system.cpus().iter().map(|c| c.cpu_usage()).collect();
-        let cpu_total = if cpu_usage.is_empty() { 0.0 } else { cpu_usage.iter().sum::<f32>() / cpu_usage.len() as f32 };
-        let cpu_freq_mhz = self.system.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0);
-        let cpu_model = self.system.cpus().first().map(|c| c.brand().trim().to_string()).unwrap_or_else(|| "Unknown CPU".into());
+        let cpu_total = if cpu_usage.is_empty() {
+            0.0
+        } else {
+            cpu_usage.iter().sum::<f32>() / cpu_usage.len() as f32
+        };
+        let cpu_freq_mhz = self
+            .system
+            .cpus()
+            .iter()
+            .map(|c| c.frequency())
+            .max()
+            .unwrap_or(0);
+        let cpu_model = self
+            .system
+            .cpus()
+            .first()
+            .map(|c| c.brand().trim().to_string())
+            .unwrap_or_else(|| "Unknown CPU".into());
         let cpu_temp_c = self
             .components
             .iter()
             .filter(|c| {
                 let l = c.label().to_ascii_lowercase();
-                l.contains("package") || l.contains("tctl") || l.contains("cpu") || l.contains("core 0")
+                l.contains("package")
+                    || l.contains("tctl")
+                    || l.contains("cpu")
+                    || l.contains("core 0")
             })
             .filter_map(|c| c.temperature())
-            .fold(None, |acc: Option<f32>, t| Some(acc.map_or(t, |a| a.max(t))));
+            .fold(None, |acc: Option<f32>, t| {
+                Some(acc.map_or(t, |a| a.max(t)))
+            });
 
         // sysinfo reports bytes since the previous refresh; convert to kB/s.
         let tx_bytes: u64 = self.networks.values().map(|n| n.transmitted()).sum();
@@ -127,7 +150,10 @@ impl SysmonCollector {
             .iter()
             .filter(|d| {
                 let mp = d.mount_point().to_string_lossy();
-                !(mp.starts_with("/boot") && mp.len() > 5) && !mp.starts_with("/run") && !mp.starts_with("/snap") && d.total_space() > 0
+                !(mp.starts_with("/boot") && mp.len() > 5)
+                    && !mp.starts_with("/run")
+                    && !mp.starts_with("/snap")
+                    && d.total_space() > 0
             })
             .map(|d| DiskInfo {
                 mount: d.mount_point().display().to_string(),
@@ -136,17 +162,34 @@ impl SysmonCollector {
                 fs_type: d.file_system().to_string_lossy().to_string(),
             })
             .collect();
-        disks.sort_by(|a, b| a.mount.len().cmp(&b.mount.len()).then_with(|| a.mount.cmp(&b.mount)));
-        disks.dedup_by(|a, b| a.total_bytes == b.total_bytes && a.used_bytes == b.used_bytes && a.fs_type == b.fs_type);
+        disks.sort_by(|a, b| {
+            a.mount
+                .len()
+                .cmp(&b.mount.len())
+                .then_with(|| a.mount.cmp(&b.mount))
+        });
+        disks.dedup_by(|a, b| {
+            a.total_bytes == b.total_bytes && a.used_bytes == b.used_bytes && a.fs_type == b.fs_type
+        });
 
         let mut processes: Vec<ProcInfo> = self
             .system
             .processes()
             .iter()
             .filter(|(_, p)| p.thread_kind().is_none())
-            .map(|(pid, p)| ProcInfo { pid: pid.as_u32(), name: p.name().to_string_lossy().to_string(), cpu_pct: p.cpu_usage(), mem_kb: p.memory() / 1024 })
+            .map(|(pid, p)| ProcInfo {
+                pid: pid.as_u32(),
+                name: p.name().to_string_lossy().to_string(),
+                cpu_pct: p.cpu_usage(),
+                mem_kb: p.memory() / 1024,
+            })
             .collect();
-        processes.sort_by(|a, b| b.cpu_pct.partial_cmp(&a.cpu_pct).unwrap_or(std::cmp::Ordering::Equal).then_with(|| b.mem_kb.cmp(&a.mem_kb)));
+        processes.sort_by(|a, b| {
+            b.cpu_pct
+                .partial_cmp(&a.cpu_pct)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.mem_kb.cmp(&a.mem_kb))
+        });
         processes.truncate(12);
 
         let battery = read_battery();
@@ -159,7 +202,11 @@ impl SysmonCollector {
             cpu_temp_c,
             load_avg: [load.one as f32, load.five as f32, load.fifteen as f32],
             uptime_secs: System::uptime(),
-            kernel: format!("{} {}", System::name().unwrap_or_else(|| "Linux".into()), System::kernel_version().unwrap_or_default()),
+            kernel: format!(
+                "{} {}",
+                System::name().unwrap_or_else(|| "Linux".into()),
+                System::kernel_version().unwrap_or_default()
+            ),
             hostname: System::host_name().unwrap_or_else(|| "edex".into()),
             ram_used_kb: self.system.used_memory() / 1024,
             ram_total_kb: self.system.total_memory() / 1024,
@@ -184,7 +231,10 @@ impl SysmonCollector {
 
     /// Whether a process with the given name is running (used by privacy probes).
     pub fn process_running(&self, name: &str) -> bool {
-        self.system.processes().values().any(|p| p.name().to_string_lossy() == name)
+        self.system
+            .processes()
+            .values()
+            .any(|p| p.name().to_string_lossy() == name)
     }
 }
 
@@ -209,7 +259,12 @@ fn primary_interface(networks: &Networks) -> (String, String) {
     }
     let ip = networks
         .get(&iface)
-        .and_then(|n| n.ip_networks().iter().find(|ip| ip.addr.is_ipv4()).map(|ip| ip.addr.to_string()))
+        .and_then(|n| {
+            n.ip_networks()
+                .iter()
+                .find(|ip| ip.addr.is_ipv4())
+                .map(|ip| ip.addr.to_string())
+        })
         .unwrap_or_default();
     (iface, ip)
 }
@@ -221,7 +276,12 @@ fn default_route_interface() -> Option<String> {
         .skip(1)
         .filter_map(|l| {
             let cols: Vec<&str> = l.split_whitespace().collect();
-            (cols.len() > 3 && cols[1] == "00000000" && u32::from_str_radix(cols[3], 16).map(|f| f & 2 != 0).unwrap_or(false)).then(|| cols[0].to_string())
+            (cols.len() > 3
+                && cols[1] == "00000000"
+                && u32::from_str_radix(cols[3], 16)
+                    .map(|f| f & 2 != 0)
+                    .unwrap_or(false))
+            .then(|| cols[0].to_string())
         })
         .next()
 }

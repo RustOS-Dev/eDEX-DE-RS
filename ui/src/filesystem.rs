@@ -36,7 +36,9 @@ impl Default for FilesystemPanel {
 
 impl FilesystemPanel {
     pub fn new() -> Self {
-        let cwd = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/"));
+        let cwd = std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("/"));
         Self::at(cwd)
     }
 
@@ -79,12 +81,27 @@ impl FilesystemPanel {
                 let metadata = fs::metadata(&path).ok();
                 let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
                 let is_symlink = symlink_meta.file_type().is_symlink();
-                let size = metadata.as_ref().filter(|m| m.is_file()).map(fs::Metadata::len);
+                let size = metadata
+                    .as_ref()
+                    .filter(|m| m.is_file())
+                    .map(fs::Metadata::len);
                 let extension = path.extension().map(|e| e.to_string_lossy().to_string());
-                Some(FsEntry { name, path, is_dir, size, extension, is_hidden, is_symlink })
+                Some(FsEntry {
+                    name,
+                    path,
+                    is_dir,
+                    size,
+                    extension,
+                    is_hidden,
+                    is_symlink,
+                })
             })
             .collect();
-        entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
         self.entries = entries;
         self.selected = self.selected.min(self.entries.len().saturating_sub(1));
         self.clamp_scroll();
@@ -106,14 +123,16 @@ impl FilesystemPanel {
 
     pub fn page(&mut self, delta: i32) {
         let step = self.max_visible.max(1) as i32;
-        let target = (self.selected as i32 + delta * step).clamp(0, self.entries.len().saturating_sub(1) as i32);
+        let target = (self.selected as i32 + delta * step)
+            .clamp(0, self.entries.len().saturating_sub(1) as i32);
         self.selected = target as usize;
         self.clamp_scroll();
     }
 
     pub fn scroll_by(&mut self, delta: i32) {
         let max_offset = self.entries.len().saturating_sub(self.max_visible);
-        self.scroll_offset = (self.scroll_offset as i32 + delta).clamp(0, max_offset as i32) as usize;
+        self.scroll_offset =
+            (self.scroll_offset as i32 + delta).clamp(0, max_offset as i32) as usize;
     }
 
     /// Select the entry at a visible index (from a click).
@@ -126,7 +145,9 @@ impl FilesystemPanel {
 
     /// Enter the selected directory or open the selected file with the default handler.
     pub fn enter_selected(&mut self) {
-        let Some(entry) = self.entries.get(self.selected).cloned() else { return };
+        let Some(entry) = self.entries.get(self.selected).cloned() else {
+            return;
+        };
         if entry.is_dir {
             self.cwd = entry.path;
             self.selected = 0;
@@ -139,7 +160,10 @@ impl FilesystemPanel {
 
     pub fn go_parent(&mut self) {
         if let Some(parent) = self.cwd.parent().map(PathBuf::from) {
-            let previous = self.cwd.file_name().map(|n| n.to_string_lossy().to_string());
+            let previous = self
+                .cwd
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string());
             self.cwd = parent;
             self.selected = 0;
             self.scroll_offset = 0;
@@ -187,7 +211,9 @@ impl FilesystemPanel {
             match component {
                 Component::RootDir => crumbs.push("/".to_string()),
                 Component::Normal(part) => crumbs.push(part.to_string_lossy().to_string()),
-                Component::Prefix(prefix) => crumbs.push(prefix.as_os_str().to_string_lossy().to_string()),
+                Component::Prefix(prefix) => {
+                    crumbs.push(prefix.as_os_str().to_string_lossy().to_string())
+                }
                 _ => {}
             }
         }
@@ -221,7 +247,9 @@ impl FilesystemPanel {
     }
 
     pub fn selected_visible_index(&self) -> Option<usize> {
-        self.selected.checked_sub(self.scroll_offset).filter(|i| *i < self.max_visible)
+        self.selected
+            .checked_sub(self.scroll_offset)
+            .filter(|i| *i < self.max_visible)
     }
 
     fn clamp_scroll(&mut self) {
@@ -264,11 +292,20 @@ pub fn icon_for_entry(entry: &FsEntry) -> &'static str {
     } else if entry.is_symlink {
         "↪"
     } else {
-        match entry.extension.as_deref().map(str::to_ascii_lowercase).as_deref() {
-            Some("rs") | Some("c") | Some("h") | Some("py") | Some("js") | Some("ts") | Some("go") | Some("lua") => "λ",
-            Some("toml") | Some("yaml") | Some("yml") | Some("json") | Some("conf") | Some("ini") => "⚙",
+        match entry
+            .extension
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            Some("rs") | Some("c") | Some("h") | Some("py") | Some("js") | Some("ts")
+            | Some("go") | Some("lua") => "λ",
+            Some("toml") | Some("yaml") | Some("yml") | Some("json") | Some("conf")
+            | Some("ini") => "⚙",
             Some("md") | Some("txt") | Some("pdf") | Some("doc") | Some("odt") => "≡",
-            Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("svg") | Some("webp") => "▣",
+            Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("svg") | Some("webp") => {
+                "▣"
+            }
             Some("zip") | Some("tar") | Some("gz") | Some("xz") | Some("zst") | Some("7z") => "▤",
             Some("sh") | Some("fish") | Some("bash") => "$",
             Some("mp3") | Some("flac") | Some("ogg") | Some("wav") => "♫",

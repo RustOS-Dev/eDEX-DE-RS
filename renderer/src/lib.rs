@@ -33,12 +33,24 @@ impl GpuContext {
         });
         let font_system = FontSystem::new();
         if let Some(fam) = &font_family {
-            let available = font_system.db().faces().any(|f| f.families.iter().any(|(n, _)| n == fam));
+            let available = font_system
+                .db()
+                .faces()
+                .any(|f| f.families.iter().any(|(n, _)| n == fam));
             if !available {
                 warn!(font = %fam, "configured font not found; falling back to the default monospace");
             }
         }
-        Self { instance, adapter: None, device: None, queue: None, font_system, swash_cache: SwashCache::new(), glyph_cache: None, font_family }
+        Self {
+            instance,
+            adapter: None,
+            device: None,
+            queue: None,
+            font_system,
+            swash_cache: SwashCache::new(),
+            glyph_cache: None,
+            font_family,
+        }
     }
 
     pub fn font_family(&self) -> Option<&str> {
@@ -61,12 +73,13 @@ impl GpuContext {
         if self.device.is_some() {
             return Ok(());
         }
-        let adapter = pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: Some(surface),
-        }))
-        .map_err(|e| anyhow!("no compatible GPU adapter: {e}"))?;
+        let adapter =
+            pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: Some(surface),
+            }))
+            .map_err(|e| anyhow!("no compatible GPU adapter: {e}"))?;
         let info = adapter.get_info();
         info!(name = %info.name, backend = ?info.backend, kind = ?info.device_type, "gpu adapter selected");
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -91,7 +104,13 @@ impl GpuContext {
         let line = (ui_font * 1.45).round();
         let cell_h = (term_font * 1.35).round();
         let (cell_w, _) = measure_mono(&mut self.font_system, family.as_deref(), term_font, cell_h);
-        Metrics { ui_font, line, cell_w: (cell_w * 100.0).round() / 100.0, cell_h, term_font }
+        Metrics {
+            ui_font,
+            line,
+            cell_w: (cell_w * 100.0).round() / 100.0,
+            cell_h,
+            term_font,
+        }
     }
 }
 
@@ -110,12 +129,19 @@ pub struct SurfaceRenderer {
 }
 
 impl SurfaceRenderer {
-    pub fn new(ctx: &mut GpuContext, handles: (RawDisplayHandle, RawWindowHandle), width: u32, height: u32, scale: f32) -> Result<Self> {
+    pub fn new(
+        ctx: &mut GpuContext,
+        handles: (RawDisplayHandle, RawWindowHandle),
+        width: u32,
+        height: u32,
+        scale: f32,
+    ) -> Result<Self> {
         let surface = unsafe {
-            ctx.instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                raw_display_handle: Some(handles.0),
-                raw_window_handle: handles.1,
-            })
+            ctx.instance
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(handles.0),
+                    raw_window_handle: handles.1,
+                })
         }
         .context("failed to create wgpu surface")?;
         ctx.ensure_device(&surface)?;
@@ -127,19 +153,37 @@ impl SurfaceRenderer {
             .formats
             .iter()
             .copied()
-            .find(|f| matches!(f, wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Rgba8UnormSrgb))
+            .find(|f| {
+                matches!(
+                    f,
+                    wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Rgba8UnormSrgb
+                )
+            })
             .or_else(|| caps.formats.first().copied())
             .ok_or_else(|| anyhow!("surface exposes no texture formats"))?;
-        let present_mode = [wgpu::PresentMode::Mailbox, wgpu::PresentMode::Immediate, wgpu::PresentMode::Fifo]
-            .into_iter()
-            .find(|m| caps.present_modes.contains(m))
-            .unwrap_or(wgpu::PresentMode::Fifo);
-        let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+        let present_mode = [
+            wgpu::PresentMode::Mailbox,
+            wgpu::PresentMode::Immediate,
+            wgpu::PresentMode::Fifo,
+        ]
+        .into_iter()
+        .find(|m| caps.present_modes.contains(m))
+        .unwrap_or(wgpu::PresentMode::Fifo);
+        let alpha_mode = if caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
             wgpu::CompositeAlphaMode::PreMultiplied
-        } else if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+        } else if caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PostMultiplied)
+        {
             wgpu::CompositeAlphaMode::PostMultiplied
         } else {
-            caps.alpha_modes.first().copied().unwrap_or(wgpu::CompositeAlphaMode::Auto)
+            caps.alpha_modes
+                .first()
+                .copied()
+                .unwrap_or(wgpu::CompositeAlphaMode::Auto)
         };
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -152,11 +196,19 @@ impl SurfaceRenderer {
             view_formats: vec![],
         };
         surface.configure(device, &config);
-        info!(?format, ?present_mode, ?alpha_mode, width, height, "surface configured");
+        info!(
+            ?format,
+            ?present_mode,
+            ?alpha_mode,
+            width,
+            height,
+            "surface configured"
+        );
         let cache = ctx.glyph_cache.as_ref().expect("glyph cache");
         let viewport = Viewport::new(device, cache);
         let mut atlas = TextAtlas::new(device, queue, cache, format);
-        let text_renderer = TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
+        let text_renderer =
+            TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
         Ok(Self {
             rects: RectPipeline::new(device, format),
             scanlines: ScanlinePipeline::new(device, format),
@@ -207,39 +259,74 @@ impl SurfaceRenderer {
         let srgb = self.config.format.is_srgb();
 
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
+            wgpu::CurrentSurfaceTexture::Success(f)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(device, &self.config);
                 return Ok(false);
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return Ok(false),
-            wgpu::CurrentSurfaceTexture::Validation => return Err(anyhow!("surface validation error")),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(false)
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(anyhow!("surface validation error"))
+            }
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         self.rects.upload(device, queue, scene, self.scale, srgb);
 
         self.text_cache.begin_frame();
-        let keys: Vec<u64> = scene.texts.iter().map(|t| self.text_cache.prepare(&mut ctx.font_system, t)).collect();
-        self.viewport.update(queue, glyphon::Resolution { width: physical.0, height: physical.1 });
+        let keys: Vec<u64> = scene
+            .texts
+            .iter()
+            .map(|t| self.text_cache.prepare(&mut ctx.font_system, t))
+            .collect();
+        self.viewport.update(
+            queue,
+            glyphon::Resolution {
+                width: physical.0,
+                height: physical.1,
+            },
+        );
         {
             let areas = scene
                 .texts
                 .iter()
                 .zip(keys.iter())
                 .filter_map(|(spec, key)| self.text_cache.area(*key, spec, self.scale, physical));
-            if let Err(e) = self.text_renderer.prepare(device, queue, &mut ctx.font_system, &mut self.atlas, &self.viewport, areas, &mut ctx.swash_cache) {
+            if let Err(e) = self.text_renderer.prepare(
+                device,
+                queue,
+                &mut ctx.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                areas,
+                &mut ctx.swash_cache,
+            ) {
                 warn!("text prepare failed: {e:?}");
             }
         }
         self.text_cache.end_frame(240);
 
         if let Some(s) = scene.scanlines {
-            self.scanlines.update(queue, ScanParams { size: [physical.0 as f32, physical.1 as f32], scale: self.scale, intensity: s.intensity, color: s.color });
+            self.scanlines.update(
+                queue,
+                ScanParams {
+                    size: [physical.0 as f32, physical.1 as f32],
+                    scale: self.scale,
+                    intensity: s.intensity,
+                    color: s.color,
+                },
+            );
         }
 
         let clear = to_linear_if(scene.clear, srgb);
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("edex frame") });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("edex frame"),
+        });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("edex pass"),
@@ -248,7 +335,12 @@ impl SurfaceRenderer {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: clear[0] as f64, g: clear[1] as f64, b: clear[2] as f64, a: clear[3] as f64 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: clear[0] as f64,
+                            g: clear[1] as f64,
+                            b: clear[2] as f64,
+                            a: clear[3] as f64,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -258,7 +350,10 @@ impl SurfaceRenderer {
                 multiview_mask: None,
             });
             self.rects.draw(&mut pass);
-            if let Err(e) = self.text_renderer.render(&self.atlas, &self.viewport, &mut pass) {
+            if let Err(e) = self
+                .text_renderer
+                .render(&self.atlas, &self.viewport, &mut pass)
+            {
                 warn!("text render failed: {e:?}");
             }
             if scene.scanlines.is_some() {

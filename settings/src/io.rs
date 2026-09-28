@@ -48,7 +48,10 @@ pub fn load(path: &Path) -> Config {
 pub fn save(path: &Path, config: &Config) -> Result<()> {
     let dir = path.parent().context("config path has no parent")?;
     fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-    let text = format!("# eDEX-DE configuration — edited by the Settings panel; hand edits are fine too.\n{}", toml::to_string_pretty(config)?);
+    let text = format!(
+        "# eDEX-DE configuration — edited by the Settings panel; hand edits are fine too.\n{}",
+        toml::to_string_pretty(config)?
+    );
     let tmp = path.with_extension("toml.tmp");
     fs::write(&tmp, text).with_context(|| format!("writing {}", tmp.display()))?;
     fs::rename(&tmp, path).with_context(|| format!("renaming into {}", path.display()))?;
@@ -83,8 +86,15 @@ pub fn watch(path: &Path) -> Result<ConfigWatcher> {
     let target = path.file_name().map(|n| n.to_os_string());
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         if let Ok(event) = res {
-            if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)) {
-                let relevant = event.paths.iter().any(|p| p.file_name().map(|n| Some(n.to_os_string()) == target).unwrap_or(false));
+            if matches!(
+                event.kind,
+                EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+            ) {
+                let relevant = event.paths.iter().any(|p| {
+                    p.file_name()
+                        .map(|n| Some(n.to_os_string()) == target)
+                        .unwrap_or(false)
+                });
                 if relevant {
                     let _ = tx.send(());
                 }
@@ -94,7 +104,11 @@ pub fn watch(path: &Path) -> Result<ConfigWatcher> {
     let dir = path.parent().context("config path has no parent")?;
     fs::create_dir_all(dir)?;
     watcher.watch(dir, RecursiveMode::NonRecursive)?;
-    Ok(ConfigWatcher { _watcher: watcher, rx, path: path.to_path_buf() })
+    Ok(ConfigWatcher {
+        _watcher: watcher,
+        rx,
+        path: path.to_path_buf(),
+    })
 }
 
 /// Debounce helper for callers polling `ConfigWatcher::changed`.

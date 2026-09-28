@@ -92,13 +92,23 @@ pub fn strip_markup(body: &str) -> String {
             _ => {}
         }
     }
-    out.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", "\"").replace("&apos;", "'")
+    out.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
 }
 
 #[interface(name = "org.freedesktop.Notifications")]
 impl Interface {
     fn get_capabilities(&self) -> Vec<&'static str> {
-        vec!["body", "body-markup", "actions", "persistence", "action-icons"]
+        vec![
+            "body",
+            "body-markup",
+            "actions",
+            "persistence",
+            "action-icons",
+        ]
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -113,17 +123,33 @@ impl Interface {
         hints: HashMap<String, OwnedValue>,
         expire_timeout: i32,
     ) -> u32 {
-        let id = if replaces_id != 0 { replaces_id } else { self.next_id.fetch_add(1, Ordering::SeqCst).max(1) };
-        let actions: Vec<(String, String)> = actions.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].to_string(), c[1].to_string())).collect();
+        let id = if replaces_id != 0 {
+            replaces_id
+        } else {
+            self.next_id.fetch_add(1, Ordering::SeqCst).max(1)
+        };
+        let actions: Vec<(String, String)> = actions
+            .chunks(2)
+            .filter(|c| c.len() == 2)
+            .map(|c| (c[0].to_string(), c[1].to_string()))
+            .collect();
         let notification = Notification {
             id,
-            app: if app_name.is_empty() { "system".into() } else { app_name.to_string() },
+            app: if app_name.is_empty() {
+                "system".into()
+            } else {
+                app_name.to_string()
+            },
             icon: app_icon.to_string(),
             summary: summary.to_string(),
             body: strip_markup(body),
             actions,
             urgency: Urgency::from(hint_u8(&hints, "urgency").unwrap_or(1)),
-            timeout_ms: if expire_timeout < 0 { None } else { Some(expire_timeout as u32) },
+            timeout_ms: if expire_timeout < 0 {
+                None
+            } else {
+                Some(expire_timeout as u32)
+            },
             progress: hint_i32(&hints, "value").map(|v| (v as f32 / 100.0).clamp(0.0, 1.0)),
             transient: hint_bool(&hints, "transient").unwrap_or(false),
             desktop_entry: hint_str(&hints, "desktop-entry"),
@@ -143,10 +169,18 @@ impl Interface {
     }
 
     #[zbus(signal)]
-    async fn notification_closed(emitter: &SignalEmitter<'_>, id: u32, reason: u32) -> zbus::Result<()>;
+    async fn notification_closed(
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        reason: u32,
+    ) -> zbus::Result<()>;
 
     #[zbus(signal)]
-    async fn action_invoked(emitter: &SignalEmitter<'_>, id: u32, action_key: &str) -> zbus::Result<()>;
+    async fn action_invoked(
+        emitter: &SignalEmitter<'_>,
+        id: u32,
+        action_key: &str,
+    ) -> zbus::Result<()>;
 }
 
 /// Running server; drop to release the bus name.
@@ -164,12 +198,22 @@ impl NotificationServer {
         let connection = Connection::session().context("connecting to the session bus")?;
         connection
             .object_server()
-            .at(OBJECT_PATH, Interface { sink, next_id: next_id.clone() })
+            .at(
+                OBJECT_PATH,
+                Interface {
+                    sink,
+                    next_id: next_id.clone(),
+                },
+            )
             .context("registering the notifications object")?;
         match connection.request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into()) {
             Ok(_) => {
                 info!("owning {BUS_NAME}");
-                Ok(Self { connection, _next_id: next_id, owned: Arc::new(Mutex::new(true)) })
+                Ok(Self {
+                    connection,
+                    _next_id: next_id,
+                    owned: Arc::new(Mutex::new(true)),
+                })
             }
             Err(e) => {
                 warn!("could not own {BUS_NAME}: {e}; another notification daemon is running");
@@ -208,18 +252,33 @@ impl Drop for NotificationServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{process::{Command, Stdio}, sync::mpsc, time::Duration};
+    use std::{
+        process::{Command, Stdio},
+        sync::mpsc,
+        time::Duration,
+    };
 
     #[test]
     fn strips_markup() {
-        assert_eq!(strip_markup("<b>bold</b> &amp; <a href='x'>link</a>"), "bold & link");
+        assert_eq!(
+            strip_markup("<b>bold</b> &amp; <a href='x'>link</a>"),
+            "bold & link"
+        );
     }
 
     /// Spawns a private session bus, starts the server and sends a notification with
     /// `notify-send`, checking the event arrives and the name is owned.
     #[test]
     fn serves_notifications_on_a_private_bus() {
-        if Command::new("dbus-daemon").arg("--version").output().is_err() || Command::new("notify-send").arg("--version").output().is_err() {
+        if Command::new("dbus-daemon")
+            .arg("--version")
+            .output()
+            .is_err()
+            || Command::new("notify-send")
+                .arg("--version")
+                .output()
+                .is_err()
+        {
             eprintln!("skipping: dbus-daemon or notify-send not installed");
             return;
         }
@@ -227,7 +286,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let addr = format!("unix:path={}/bus", dir.display());
         let mut daemon = Command::new("dbus-daemon")
-            .args(["--session", "--nofork", "--nopidfile", &format!("--address={addr}")])
+            .args([
+                "--session",
+                "--nofork",
+                "--nopidfile",
+                &format!("--address={addr}"),
+            ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -241,7 +305,20 @@ mod tests {
         });
         let server = NotificationServer::start(sink).unwrap();
         assert!(server.is_owner());
-        let status = Command::new("notify-send").args(["-a", "test-app", "-u", "critical", "-t", "0", "Hello", "<b>World</b>"]).env("DBUS_SESSION_BUS_ADDRESS", &addr).status().unwrap();
+        let status = Command::new("notify-send")
+            .args([
+                "-a",
+                "test-app",
+                "-u",
+                "critical",
+                "-t",
+                "0",
+                "Hello",
+                "<b>World</b>",
+            ])
+            .env("DBUS_SESSION_BUS_ADDRESS", &addr)
+            .status()
+            .unwrap();
         assert!(status.success());
         let ev = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         match ev {

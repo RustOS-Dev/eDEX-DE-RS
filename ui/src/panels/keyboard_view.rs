@@ -15,7 +15,8 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, key_h: f32, state: &ShellState) {
     }
     let t = ctx.theme;
     ctx.scene.fill(rect, t.background);
-    ctx.scene.hline(rect.x, rect.y, rect.w, with_alpha(t.border, 0.5));
+    ctx.scene
+        .hline(rect.x, rect.y, rect.w, with_alpha(t.border, 0.5));
     let kb = &state.keyboard;
     let shifted = kb.shift || kb.sticky_shift || kb.caps_lock;
     let size = ctx.small();
@@ -34,9 +35,25 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, key_h: f32, state: &ShellState) {
             };
             let border = if pressed { t.border } else { t.key_border };
             ctx.scene.shape(RectKind::KeyCap, kr, fill, border, 1.0);
-            let label = if shifted && matches!(key.action, KeyAction::Char(_)) { key.shifted } else { key.label };
-            let fg = if pressed { t.background } else if matches!(key.action, KeyAction::Char(_)) { t.text_primary } else { t.text_secondary };
-            ctx.scene.text_aligned(Rect::new(kr.x, kr.y + (kr.h - line) / 2.0, kr.w, line), size, fg, Align::Center, label);
+            let label = if shifted && matches!(key.action, KeyAction::Char(_)) {
+                key.shifted
+            } else {
+                key.label
+            };
+            let fg = if pressed {
+                t.background
+            } else if matches!(key.action, KeyAction::Char(_)) {
+                t.text_primary
+            } else {
+                t.text_secondary
+            };
+            ctx.scene.text_aligned(
+                Rect::new(kr.x, kr.y + (kr.h - line) / 2.0, kr.w, line),
+                size,
+                fg,
+                Align::Center,
+                label,
+            );
             ctx.hits.push(kr, HitTarget::KeyboardKey(r, c));
         }
     }

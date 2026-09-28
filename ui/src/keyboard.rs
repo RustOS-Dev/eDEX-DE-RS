@@ -36,39 +36,83 @@ pub struct KeyDef {
 }
 
 const fn key(label: &'static str, shifted: &'static str, units: f32, action: KeyAction) -> KeyDef {
-    KeyDef { label, shifted, units, action }
+    KeyDef {
+        label,
+        shifted,
+        units,
+        action,
+    }
 }
 
 const fn ch(label: &'static str, shifted: &'static str, c: char) -> KeyDef {
-    KeyDef { label, shifted, units: 1.0, action: KeyAction::Char(c) }
+    KeyDef {
+        label,
+        shifted,
+        units: 1.0,
+        action: KeyAction::Char(c),
+    }
 }
 
 pub const ROWS: [&[KeyDef]; KEYBOARD_ROWS] = [
     &[
         key("ESC", "ESC", 1.0, KeyAction::Escape),
-        ch("1", "!", '1'), ch("2", "@", '2'), ch("3", "#", '3'), ch("4", "$", '4'), ch("5", "%", '5'),
-        ch("6", "^", '6'), ch("7", "&", '7'), ch("8", "*", '8'), ch("9", "(", '9'), ch("0", ")", '0'),
-        ch("-", "_", '-'), ch("=", "+", '='),
+        ch("1", "!", '1'),
+        ch("2", "@", '2'),
+        ch("3", "#", '3'),
+        ch("4", "$", '4'),
+        ch("5", "%", '5'),
+        ch("6", "^", '6'),
+        ch("7", "&", '7'),
+        ch("8", "*", '8'),
+        ch("9", "(", '9'),
+        ch("0", ")", '0'),
+        ch("-", "_", '-'),
+        ch("=", "+", '='),
         key("BKSP", "BKSP", 2.0, KeyAction::Backspace),
     ],
     &[
         key("TAB", "TAB", 1.5, KeyAction::Tab),
-        ch("q", "Q", 'q'), ch("w", "W", 'w'), ch("e", "E", 'e'), ch("r", "R", 'r'), ch("t", "T", 't'),
-        ch("y", "Y", 'y'), ch("u", "U", 'u'), ch("i", "I", 'i'), ch("o", "O", 'o'), ch("p", "P", 'p'),
-        ch("[", "{", '['), ch("]", "}", ']'),
+        ch("q", "Q", 'q'),
+        ch("w", "W", 'w'),
+        ch("e", "E", 'e'),
+        ch("r", "R", 'r'),
+        ch("t", "T", 't'),
+        ch("y", "Y", 'y'),
+        ch("u", "U", 'u'),
+        ch("i", "I", 'i'),
+        ch("o", "O", 'o'),
+        ch("p", "P", 'p'),
+        ch("[", "{", '['),
+        ch("]", "}", ']'),
         key("\\", "|", 1.5, KeyAction::Char('\\')),
     ],
     &[
         key("CAPS", "CAPS", 1.75, KeyAction::CapsLock),
-        ch("a", "A", 'a'), ch("s", "S", 's'), ch("d", "D", 'd'), ch("f", "F", 'f'), ch("g", "G", 'g'),
-        ch("h", "H", 'h'), ch("j", "J", 'j'), ch("k", "K", 'k'), ch("l", "L", 'l'),
-        ch(";", ":", ';'), ch("'", "\"", '\''),
+        ch("a", "A", 'a'),
+        ch("s", "S", 's'),
+        ch("d", "D", 'd'),
+        ch("f", "F", 'f'),
+        ch("g", "G", 'g'),
+        ch("h", "H", 'h'),
+        ch("j", "J", 'j'),
+        ch("k", "K", 'k'),
+        ch("l", "L", 'l'),
+        ch(";", ":", ';'),
+        ch("'", "\"", '\''),
         key("ENTER", "ENTER", 2.25, KeyAction::Enter),
     ],
     &[
         key("SHIFT", "SHIFT", 2.25, KeyAction::Shift),
-        ch("z", "Z", 'z'), ch("x", "X", 'x'), ch("c", "C", 'c'), ch("v", "V", 'v'), ch("b", "B", 'b'),
-        ch("n", "N", 'n'), ch("m", "M", 'm'), ch(",", "<", ','), ch(".", ">", '.'), ch("/", "?", '/'),
+        ch("z", "Z", 'z'),
+        ch("x", "X", 'x'),
+        ch("c", "C", 'c'),
+        ch("v", "V", 'v'),
+        ch("b", "B", 'b'),
+        ch("n", "N", 'n'),
+        ch("m", "M", 'm'),
+        ch(",", "<", ','),
+        ch(".", ">", '.'),
+        ch("/", "?", '/'),
         key("SHIFT", "SHIFT", 2.75, KeyAction::Shift),
     ],
     &[
@@ -167,7 +211,9 @@ pub fn action_for_keysym(keysym: u32, text: Option<&str>) -> Option<KeyAction> {
         0xff51 => Some(KeyAction::Left),
         0xff53 => Some(KeyAction::Right),
         _ => {
-            let c = text.and_then(|t| t.chars().next()).or_else(|| char::from_u32(keysym))?;
+            let c = text
+                .and_then(|t| t.chars().next())
+                .or_else(|| char::from_u32(keysym))?;
             let base = unshift(c);
             Some(KeyAction::Char(base))
         }
@@ -176,9 +222,27 @@ pub fn action_for_keysym(keysym: u32, text: Option<&str>) -> Option<KeyAction> {
 
 fn unshift(c: char) -> char {
     match c {
-        '!' => '1', '@' => '2', '#' => '3', '$' => '4', '%' => '5', '^' => '6', '&' => '7', '*' => '8',
-        '(' => '9', ')' => '0', '_' => '-', '+' => '=', '{' => '[', '}' => ']', '|' => '\\', ':' => ';',
-        '"' => '\'', '<' => ',', '>' => '.', '?' => '/', '~' => '`',
+        '!' => '1',
+        '@' => '2',
+        '#' => '3',
+        '$' => '4',
+        '%' => '5',
+        '^' => '6',
+        '&' => '7',
+        '*' => '8',
+        '(' => '9',
+        ')' => '0',
+        '_' => '-',
+        '+' => '=',
+        '{' => '[',
+        '}' => ']',
+        '|' => '\\',
+        ':' => ';',
+        '"' => '\'',
+        '<' => ',',
+        '>' => '.',
+        '?' => '/',
+        '~' => '`',
         other => other.to_ascii_lowercase(),
     }
 }
@@ -211,7 +275,10 @@ mod tests {
 
     #[test]
     fn finds_keys_for_keysyms() {
-        assert_eq!(action_for_keysym(0x41, Some("A")), Some(KeyAction::Char('a')));
+        assert_eq!(
+            action_for_keysym(0x41, Some("A")),
+            Some(KeyAction::Char('a'))
+        );
         assert_eq!(find_key(KeyAction::Char('A')), Some((2, 1)));
         assert_eq!(action_for_keysym(0xff0d, None), Some(KeyAction::Enter));
         assert_eq!(find_key(KeyAction::Enter), Some((2, 12)));

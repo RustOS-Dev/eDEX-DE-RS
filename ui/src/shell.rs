@@ -24,7 +24,13 @@ pub fn render_canvas(state: &ShellState, width: f32, height: f32) -> (Rendered, 
     let mut hits = HitMap::default();
     let pulse = state.pulse();
     {
-        let mut ctx = Ctx { scene: &mut scene, hits: &mut hits, theme: &state.theme, metrics: &state.metrics, pulse };
+        let mut ctx = Ctx {
+            scene: &mut scene,
+            hits: &mut hits,
+            theme: &state.theme,
+            metrics: &state.metrics,
+            pulse,
+        };
         panels::statusbar::draw(&mut ctx, layout.status_bar, state);
         panels::topbar::draw(&mut ctx, layout.top_bar, state);
         panels::filesystem_view::draw(&mut ctx, layout.filesystem, state);
@@ -37,18 +43,30 @@ pub fn render_canvas(state: &ShellState, width: f32, height: f32) -> (Rendered, 
         }
     }
     if state.scanlines {
-        scene.scanlines = Some(Scanlines { color: state.theme.border, intensity: 0.18 });
+        scene.scanlines = Some(Scanlines {
+            color: state.theme.border,
+            intensity: 0.18,
+        });
     }
     (Rendered { scene, hits }, layout)
 }
 
 fn draw_handles(ctx: &mut Ctx, layout: &PanelLayout, state: &ShellState) {
     let t = ctx.theme;
-    for (rect, handle) in [(layout.fs_handle, ResizeHandle::FsTerminal), (layout.sysinfo_handle, ResizeHandle::TerminalSysinfo)] {
+    for (rect, handle) in [
+        (layout.fs_handle, ResizeHandle::FsTerminal),
+        (layout.sysinfo_handle, ResizeHandle::TerminalSysinfo),
+    ] {
         let active = state.resize.dragging == Some(handle) || state.resize.hover == Some(handle);
         let grip_h = 56.0f32.min(rect.h);
-        let grip = Rect::new(rect.x + 1.0, rect.y + (rect.h - grip_h) / 2.0, rect.w - 2.0, grip_h);
-        ctx.scene.fill(grip, with_alpha(t.border, if active { 1.0 } else { 0.45 }));
+        let grip = Rect::new(
+            rect.x + 1.0,
+            rect.y + (rect.h - grip_h) / 2.0,
+            rect.w - 2.0,
+            grip_h,
+        );
+        ctx.scene
+            .fill(grip, with_alpha(t.border, if active { 1.0 } else { 0.45 }));
         ctx.hits.push(rect, HitTarget::ResizeHandle(handle));
     }
 }
@@ -65,13 +83,33 @@ fn draw_boot(ctx: &mut Ctx, screen: Rect, state: &ShellState) {
     let x = (screen.w * 0.12).round();
     let mut y = (screen.h * 0.3).round();
     for (i, l) in lines.iter().enumerate() {
-        let color = if i == 0 || l.starts_with("SYSTEM") { with_alpha(t.border, alpha) } else { with_alpha(t.text_secondary, alpha) };
-        let size = if i == 0 { (ctx.metrics.ui_font * 1.5).round() } else { ctx.metrics.ui_font };
-        ctx.scene.text_bold(Rect::new(x, y, screen.w - x * 2.0, line_h * 1.5), size, color, Align::Left, l.clone());
+        let color = if i == 0 || l.starts_with("SYSTEM") {
+            with_alpha(t.border, alpha)
+        } else {
+            with_alpha(t.text_secondary, alpha)
+        };
+        let size = if i == 0 {
+            (ctx.metrics.ui_font * 1.5).round()
+        } else {
+            ctx.metrics.ui_font
+        };
+        ctx.scene.text_bold(
+            Rect::new(x, y, screen.w - x * 2.0, line_h * 1.5),
+            size,
+            color,
+            Align::Left,
+            l.clone(),
+        );
         y += if i == 0 { line_h * 2.0 } else { line_h };
     }
     let s = ctx.small();
-    ctx.scene.text_aligned(Rect::new(0.0, screen.bottom() - line_h * 2.0, screen.w, line_h), s, with_alpha(t.text_dim, alpha), Align::Center, format!("eDEX-DE {}  //  press any key to skip", state.version));
+    ctx.scene.text_aligned(
+        Rect::new(0.0, screen.bottom() - line_h * 2.0, screen.w, line_h),
+        s,
+        with_alpha(t.text_dim, alpha),
+        Align::Center,
+        format!("eDEX-DE {}  //  press any key to skip", state.version),
+    );
 }
 
 /// Build the overlay surface contents, if an overlay is open.
@@ -81,13 +119,23 @@ pub fn render_overlay(state: &ShellState, width: f32, height: f32) -> Option<Ren
     let mut hits = HitMap::default();
     let screen = Rect::new(0.0, 0.0, width, height);
     {
-        let mut ctx = Ctx { scene: &mut scene, hits: &mut hits, theme: &state.theme, metrics: &state.metrics, pulse: state.pulse() };
+        let mut ctx = Ctx {
+            scene: &mut scene,
+            hits: &mut hits,
+            theme: &state.theme,
+            metrics: &state.metrics,
+            pulse: state.pulse(),
+        };
         match kind {
             OverlayKind::Launcher => overlays::launcher::draw(&mut ctx, screen, state),
             OverlayKind::Power => overlays::power::draw(&mut ctx, screen, state),
             OverlayKind::Notifications => overlays::notifications::draw(&mut ctx, screen, state),
-            OverlayKind::Settings => overlays::form_view::draw(&mut ctx, screen, state, &state.settings),
-            OverlayKind::Privacy => overlays::form_view::draw(&mut ctx, screen, state, &state.privacy),
+            OverlayKind::Settings => {
+                overlays::form_view::draw(&mut ctx, screen, state, &state.settings)
+            }
+            OverlayKind::Privacy => {
+                overlays::form_view::draw(&mut ctx, screen, state, &state.privacy)
+            }
         }
     }
     Some(Rendered { scene, hits })
@@ -101,7 +149,13 @@ pub fn render_toasts(state: &ShellState, width: f32, height: f32) -> Option<Rend
     let mut scene = Scene::new(width, height, [0.0, 0.0, 0.0, 0.0]);
     let mut hits = HitMap::default();
     {
-        let mut ctx = Ctx { scene: &mut scene, hits: &mut hits, theme: &state.theme, metrics: &state.metrics, pulse: state.pulse() };
+        let mut ctx = Ctx {
+            scene: &mut scene,
+            hits: &mut hits,
+            theme: &state.theme,
+            metrics: &state.metrics,
+            pulse: state.pulse(),
+        };
         overlays::toasts::draw(&mut ctx, Rect::new(0.0, 0.0, width, height), state);
     }
     Some(Rendered { scene, hits })
@@ -109,5 +163,8 @@ pub fn render_toasts(state: &ShellState, width: f32, height: f32) -> Option<Rend
 
 /// Whether an OSD has expired.
 pub fn osd_expired(state: &ShellState, now: Instant) -> bool {
-    state.osd.as_ref().is_some_and(|o| now.duration_since(o.shown_at) >= overlays::toasts::OSD_DURATION)
+    state
+        .osd
+        .as_ref()
+        .is_some_and(|o| now.duration_since(o.shown_at) >= overlays::toasts::OSD_DURATION)
 }

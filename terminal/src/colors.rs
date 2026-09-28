@@ -16,7 +16,12 @@ pub struct Palette {
 }
 
 fn rgb(c: Rgb) -> UiColor {
-    [c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0, 1.0]
+    [
+        c.r as f32 / 255.0,
+        c.g as f32 / 255.0,
+        c.b as f32 / 255.0,
+        1.0,
+    ]
 }
 
 fn dim(c: UiColor) -> UiColor {
@@ -24,7 +29,12 @@ fn dim(c: UiColor) -> UiColor {
 }
 
 fn bright(c: UiColor) -> UiColor {
-    [(c[0] * 1.2).min(1.0), (c[1] * 1.2).min(1.0), (c[2] * 1.2).min(1.0), c[3]]
+    [
+        (c[0] * 1.2).min(1.0),
+        (c[1] * 1.2).min(1.0),
+        (c[2] * 1.2).min(1.0),
+        c[3],
+    ]
 }
 
 impl Palette {
@@ -56,7 +66,13 @@ impl Palette {
                 let r = i / 36;
                 let g = (i % 36) / 6;
                 let b = i % 6;
-                let f = |v: u8| if v == 0 { 0.0 } else { (55.0 + v as f32 * 40.0) / 255.0 };
+                let f = |v: u8| {
+                    if v == 0 {
+                        0.0
+                    } else {
+                        (55.0 + v as f32 * 40.0) / 255.0
+                    }
+                };
                 [f(r), f(g), f(b), 1.0]
             }
             _ => {

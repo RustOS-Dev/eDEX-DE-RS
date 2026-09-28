@@ -11,15 +11,35 @@ pub struct ListItem {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ControlKind {
     Toggle(bool),
-    Slider { value: f32, min: f32, max: f32, step: f32, unit: String },
-    Choice { options: Vec<String>, selected: usize },
+    Slider {
+        value: f32,
+        min: f32,
+        max: f32,
+        step: f32,
+        unit: String,
+    },
+    Choice {
+        options: Vec<String>,
+        selected: usize,
+    },
     Button(String),
     /// Editable text field (`secret` masks the value).
-    Text { value: String, secret: bool, placeholder: String },
+    Text {
+        value: String,
+        secret: bool,
+        placeholder: String,
+    },
     Info(String),
-    Progress { frac: f32, label: String },
+    Progress {
+        frac: f32,
+        label: String,
+    },
     /// Selectable list with an optional per-item action button.
-    List { items: Vec<ListItem>, action_label: Option<String>, empty: String },
+    List {
+        items: Vec<ListItem>,
+        action_label: Option<String>,
+        empty: String,
+    },
     Separator,
     /// Multi-line read-only text.
     Note(String),
@@ -35,7 +55,12 @@ pub struct Control {
 
 impl Control {
     pub fn new(id: u32, label: impl Into<String>, kind: ControlKind) -> Self {
-        Self { id, label: label.into(), kind, enabled: true }
+        Self {
+            id,
+            label: label.into(),
+            kind,
+            enabled: true,
+        }
     }
 
     pub fn disabled(mut self) -> Self {
@@ -45,7 +70,13 @@ impl Control {
 
     pub fn is_focusable(&self) -> bool {
         self.enabled
-            && !matches!(self.kind, ControlKind::Info(_) | ControlKind::Separator | ControlKind::Note(_) | ControlKind::Progress { .. })
+            && !matches!(
+                self.kind,
+                ControlKind::Info(_)
+                    | ControlKind::Separator
+                    | ControlKind::Note(_)
+                    | ControlKind::Progress { .. }
+            )
     }
 }
 
@@ -62,7 +93,10 @@ pub struct Form {
 
 impl Form {
     pub fn section(mut self, title: impl Into<String>, controls: Vec<Control>) -> Self {
-        self.sections.push(Section { title: title.into(), controls });
+        self.sections.push(Section {
+            title: title.into(),
+            controls,
+        });
         self
     }
 
@@ -75,11 +109,17 @@ impl Form {
     }
 
     pub fn control_mut(&mut self, id: u32) -> Option<&mut Control> {
-        self.sections.iter_mut().flat_map(|s| s.controls.iter_mut()).find(|c| c.id == id)
+        self.sections
+            .iter_mut()
+            .flat_map(|s| s.controls.iter_mut())
+            .find(|c| c.id == id)
     }
 
     pub fn focusable_ids(&self) -> Vec<u32> {
-        self.controls().filter(|c| c.is_focusable()).map(|c| c.id).collect()
+        self.controls()
+            .filter(|c| c.is_focusable())
+            .map(|c| c.id)
+            .collect()
     }
 }
 
@@ -101,13 +141,25 @@ impl FormState {
             self.focused = None;
             return;
         }
-        let pos = self.focused.and_then(|f| ids.iter().position(|i| *i == f)).map(|p| p as i32).unwrap_or(-1);
-        let next = if pos < 0 && delta < 0 { ids.len() as i32 - 1 } else { (pos + delta).rem_euclid(ids.len() as i32) };
+        let pos = self
+            .focused
+            .and_then(|f| ids.iter().position(|i| *i == f))
+            .map(|p| p as i32)
+            .unwrap_or(-1);
+        let next = if pos < 0 && delta < 0 {
+            ids.len() as i32 - 1
+        } else {
+            (pos + delta).rem_euclid(ids.len() as i32)
+        };
         self.focused = Some(ids[next as usize]);
     }
 
     pub fn list_cursor(&self, id: u32) -> usize {
-        self.list_cursor.iter().find(|(i, _)| *i == id).map(|(_, c)| *c).unwrap_or(0)
+        self.list_cursor
+            .iter()
+            .find(|(i, _)| *i == id)
+            .map(|(_, c)| *c)
+            .unwrap_or(0)
     }
 
     pub fn set_list_cursor(&mut self, id: u32, cursor: usize) {
