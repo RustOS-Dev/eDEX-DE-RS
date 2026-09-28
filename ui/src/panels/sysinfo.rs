@@ -7,12 +7,13 @@ use crate::{
     widgets::Ctx,
 };
 
+/// Draw a section header and return the body rect of `height`; advances `rect` past it.
 fn section(ctx: &mut Ctx, rect: &mut Rect, title: &str, height: f32) -> Option<Rect> {
-    if height + 4.0 > rect.h {
+    let line = ctx.line();
+    if height + line + 6.0 > rect.h {
         return None;
     }
     let t = ctx.theme;
-    let line = ctx.line();
     let head = Rect::new(rect.x, rect.y, rect.w, line);
     let s = ctx.small();
     ctx.scene.text_bold(head, s, t.border, Align::Left, title);
@@ -22,8 +23,8 @@ fn section(ctx: &mut Ctx, rect: &mut Rect, title: &str, height: f32) -> Option<R
         rect.w,
         with_alpha(t.border, 0.35),
     );
-    let body = Rect::new(rect.x, head.bottom() + 2.0, rect.w, height - line - 2.0);
-    *rect = rect.below(height + 6.0);
+    let body = Rect::new(rect.x, head.bottom() + 3.0, rect.w, height);
+    *rect = rect.below(line + 3.0 + height + 8.0);
     Some(body)
 }
 
@@ -161,7 +162,7 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
     }
 
     // Network
-    let graph_h = 34.0;
+    let graph_h = 24.0;
     if let Some(body) = section(ctx, &mut area, "NETWORK", line * 2.0 + graph_h * 2.0 + 8.0) {
         let iface = if si.net_iface.is_empty() {
             "no link".to_string()
@@ -179,7 +180,12 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
             .chain(si.net_rx_history.iter())
             .cloned()
             .fold(1.0f32, f32::max);
-        let norm = |v: &[f32]| v.iter().map(|x| x / peak).collect::<Vec<_>>();
+        const SLOTS: usize = 60;
+        let norm = |v: &[f32]| {
+            let mut out = vec![0.0f32; SLOTS.saturating_sub(v.len())];
+            out.extend(v.iter().rev().take(SLOTS).rev().map(|x| x / peak));
+            out
+        };
         let tx = Rect::new(body.x, body.y + line, body.w, graph_h);
         ctx.scene.sparkline(
             tx,
@@ -217,7 +223,7 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
             ctx,
             &mut area,
             "STORAGE",
-            disks as f32 * (line + bar_h + 2.0) + 2.0,
+            disks as f32 * (line + bar_h + 2.0),
         ) {
             for (i, d) in si.disks.iter().take(disks).enumerate() {
                 let y = body.y + i as f32 * (line + bar_h + 2.0);
@@ -244,15 +250,10 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
     }
 
     // Processes: fill remaining space
-    let remaining = area.h - line - 4.0;
+    let remaining = area.h - line - 12.0;
     let proc_rows = ((remaining / line).floor().max(0.0) as usize).min(si.processes.len());
     if proc_rows > 0 {
-        if let Some(body) = section(
-            ctx,
-            &mut area,
-            "PROCESSES",
-            line + proc_rows as f32 * line + 2.0,
-        ) {
+        if let Some(body) = section(ctx, &mut area, "PROCESSES", proc_rows as f32 * line) {
             for (i, p) in si.processes.iter().take(proc_rows).enumerate() {
                 let y = body.y + i as f32 * line;
                 let name: String = p

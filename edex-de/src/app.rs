@@ -165,7 +165,7 @@ impl App {
                 let _ = t.send(AppEvent::Term(e));
             }
         });
-        let mut terminal = TerminalTabs::new(
+        let terminal = TerminalTabs::new(
             terminal_config(&config),
             term_sink,
             80,
@@ -174,9 +174,6 @@ impl App {
             metrics.cell_h,
         )
         .context("terminal setup")?;
-        if let Err(e) = terminal.new_tab() {
-            error!("cannot spawn the first shell: {e:#}");
-        }
 
         // Hyprland
         let (hypr, hypr_events, hypr_state) = if opts.no_hypr {

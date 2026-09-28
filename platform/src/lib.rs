@@ -143,7 +143,7 @@ impl LayerSpec {
             layer: Layer::Overlay,
             anchor: Anchor::TOP | Anchor::RIGHT,
             size: (width, height),
-            exclusive_zone: 0,
+            exclusive_zone: -1,
             keyboard: KeyboardInteractivity::None,
             namespace: "edex-de:toast".into(),
             accepts_input: true,
@@ -737,9 +737,9 @@ impl<E: 'static> Platform<E> {
         if let Some(viewport) = &entry.viewport {
             viewport.set_destination(w as i32, h as i32);
         }
-        if buffer.attach_to(&entry.wl_surface).is_err() {
-            warn!("failed to attach reserver buffer");
-        }
+        // The buffer stays attached while the compositor holds it; a failed re-activation
+        // just means the previous attach is still in effect, so only the viewport changes.
+        let _ = buffer.attach_to(&entry.wl_surface);
         entry.wl_surface.damage_buffer(0, 0, 1, 1);
         entry.wl_surface.commit();
     }
