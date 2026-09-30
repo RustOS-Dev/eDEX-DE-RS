@@ -3,12 +3,20 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Release from the Actions tab: builds the checked-out branch, creates the tag on that commit and
+  # publishes the release (the tag must match the version in Cargo.toml).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to create and release, e.g. v3.1.0"
+        required: true
 
 permissions:
   contents: write
 
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   ci:
@@ -19,6 +27,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Tag matches the crate version
+        run: |
+          grep -q "^version = \"${TAG#v}\"" Cargo.toml || { echo "::error::$TAG does not match the version in Cargo.toml"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
       - name: System dependencies
         run: |
@@ -32,7 +43,7 @@ jobs:
           assets/make-assets.sh assets/generated
       - name: Tarball
         run: |
-          V=${GITHUB_REF_NAME#v}
+          V=${TAG#v}
           mkdir -p dist/edex-de-$V
           cp target/release/edex-de target/release/edex-greeter packaging/session/edex-session dist/edex-de-$V/
           cp -r themes share packaging assets/generated dist/edex-de-$V/
@@ -40,7 +51,7 @@ jobs:
           tar -C dist -czf dist/edex-de-$V-x86_64-linux.tar.gz edex-de-$V
       - name: Debian package
         run: |
-          V=${GITHUB_REF_NAME#v}
+          V=${TAG#v}
           rm -rf build-deb && mkdir build-deb
           git archive --format=tar --prefix=edex-de-$V/ HEAD | tar -x -C build-deb
           cp -r packaging/debian build-deb/edex-de-$V/debian
@@ -50,7 +61,7 @@ jobs:
           cp ../*.deb ../../dist/
       - name: RPM package
         run: |
-          V=${GITHUB_REF_NAME#v}
+          V=${TAG#v}
           mkdir -p ~/rpmbuild/{SOURCES,SPECS}
           git archive --format=tar.gz --prefix=eDEX-DE-$V/ HEAD > ~/rpmbuild/SOURCES/v$V.tar.gz
           sed "s/^Version:.*/Version:        $V/" packaging/rpm/edex-de.spec > ~/rpmbuild/SPECS/edex-de.spec
@@ -60,13 +71,15 @@ jobs:
         run: cd dist && sha256sum *.tar.gz *.deb *.rpm > SHA256SUMS
       - name: Release notes
         run: |
-          V=${GITHUB_REF_NAME#v}
+          V=${TAG#v}
           awk -v v="$V" 'BEGIN{p=0} /^## /{p = ($2 == v)} p' CHANGELOG.md > dist/notes.md
           [ -s dist/notes.md ] || echo "eDEX-DE $V" > dist/notes.md
       - uses: softprops/action-gh-release@v2
         with:
           body_path: dist/notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(env.TAG, '-') }}
           files: |
             dist/*.tar.gz
             dist/*.deb
@@ -76,7 +89,7 @@ jobs:
   aur:
     needs: release
     runs-on: ubuntu-24.04
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
     # Job-level so the publish step's `if:` can see it (step-level env is not visible there).
     env:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
@@ -84,7 +97,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: PKGBUILD with real checksum
         run: |
-          V=${GITHUB_REF_NAME#v}
+          V=${TAG#v}
           curl -sL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$V.tar.gz" -o src.tar.gz
           SUM=$(sha256sum src.tar.gz | cut -d' ' -f1)
           sed -e "s/^pkgver=.*/pkgver=$V/" -e "s/^sha256sums=.*/sha256sums=('$SUM')/" packaging/aur/PKGBUILD > PKGBUILD
@@ -98,4 +111,4 @@ jobs:
           commit_username: eDEX-OS
           commit_email: edex-de@github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ github.ref_name }}"
+          commit_message: "Update to ${{ env.TAG }}"
