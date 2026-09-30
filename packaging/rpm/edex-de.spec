@@ -1,3 +1,7 @@
+# Fallbacks for rpm without systemd-rpm-macros (e.g. building on Debian/Ubuntu).
+%{!?_userunitdir:%global _userunitdir %{_prefix}/lib/systemd/user}
+%{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
+
 Name:           edex-de
 Version:        3.0.0
 Release:        1%{?dist}
