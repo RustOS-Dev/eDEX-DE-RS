@@ -553,7 +553,7 @@ fn canvas_click(
         }
         HitTarget::Workspace(id) => {
             if let Some(h) = &app.hypr {
-                if let Err(e) = h.dispatch(&format!("workspace {id}")) {
+                if let Err(e) = h.focus_workspace(id as i32) {
                     tracing::warn!("workspace switch: {e:#}");
                 }
             }

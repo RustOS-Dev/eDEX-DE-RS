@@ -14,7 +14,7 @@ use crate::desktop::{expand_exec, AppEntry};
 pub struct LaunchOptions {
     /// Command prefix used for `Terminal=true` entries or forced terminal launches.
     pub terminal_command: String,
-    /// When true, launch through `hyprctl dispatch exec` so Hyprland tracks the workspace.
+    /// When true, launch through Hyprland (`hl.dsp.exec_cmd`) so it opens on the current workspace.
     pub via_hyprland: bool,
     pub force_terminal: bool,
 }
@@ -53,17 +53,13 @@ pub fn launch(app: &AppEntry, opts: &LaunchOptions) -> Result<()> {
 
 /// Spawn an arbitrary shell command detached from the shell.
 pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
-    if via_hyprland && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
-        let status = Command::new("hyprctl")
-            .arg("dispatch")
-            .arg("exec")
-            .arg(cmd)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        if let Ok(s) = status {
-            if s.success() {
-                return Ok(());
+    if via_hyprland {
+        if let Some(socket) = hypr::HyprSocket::from_env() {
+            match socket.exec(cmd) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!("launching through Hyprland failed, spawning directly: {e:#}")
+                }
             }
         }
     }

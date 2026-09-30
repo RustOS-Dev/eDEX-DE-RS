@@ -114,7 +114,8 @@ impl HyprSocket {
         &self.path
     }
 
-    /// Send a raw request (e.g. `j/monitors` or `dispatch workspace 2`).
+    /// Send a raw request (e.g. `j/monitors`, or `dispatch <lua>` — since 0.55 dispatch takes a
+    /// Lua expression such as `hl.dsp.focus({ workspace = 2 })`).
     pub fn request(&self, command: &str) -> Result<String> {
         let mut stream = UnixStream::connect(&self.path)
             .with_context(|| format!("connecting to {}", self.path.display()))?;
@@ -137,6 +138,33 @@ impl HyprSocket {
         })
     }
 
+    /// Switch to workspace `id`.
+    pub fn focus_workspace(&self, id: i32) -> Result<()> {
+        self.dispatch(&format!("hl.dsp.focus({{ workspace = {id} }})"))
+    }
+
+    /// Switch to the first empty workspace.
+    pub fn focus_empty_workspace(&self) -> Result<()> {
+        self.dispatch("hl.dsp.focus({ workspace = \"empty\" })")
+    }
+
+    /// Run a shell command through Hyprland (`sh -c`), so it opens on the current workspace.
+    pub fn exec(&self, cmd: &str) -> Result<()> {
+        self.dispatch(&format!("hl.dsp.exec_cmd({})", lua_string(cmd)))
+    }
+
+    /// Quit the Hyprland session.
+    pub fn exit(&self) -> Result<()> {
+        self.dispatch("hl.dsp.exit()")
+    }
+
+    /// Number of windows on the focused workspace (queried live).
+    pub fn active_workspace_windows(&self) -> Result<u32> {
+        let v: serde_json::Value = self.json("activeworkspace")?;
+        Ok(v.get("windows").and_then(|w| w.as_u64()).unwrap_or(0) as u32)
+    }
+
+    /// Dispatch a Lua expression (`hl.dsp.…`); Hyprland answers `ok` on success.
     pub fn dispatch(&self, dispatcher: &str) -> Result<()> {
         let reply = self.request(&format!("dispatch {dispatcher}"))?;
         if reply.trim() == "ok" {
@@ -281,5 +309,38 @@ mod tests {
         let parsed: Vec<RawMonitor> = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed[0].active_workspace.id, 3);
         assert_eq!(parsed[0].available_modes.len(), 1);
+    }
+}
+
+/// Quote `s` as a Lua string literal.
+pub fn lua_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\0' => out.push_str("\\0"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[cfg(test)]
+mod lua_tests {
+    use super::lua_string;
+
+    #[test]
+    fn quotes_shell_commands_for_lua() {
+        assert_eq!(lua_string("kitty"), "\"kitty\"");
+        assert_eq!(
+            lua_string("cd \"/a b\" && echo 'x'\\n"),
+            "\"cd \\\"/a b\\\" && echo 'x'\\\\n\""
+        );
+        assert_eq!(lua_string("a\nb"), "\"a\\nb\"");
     }
 }

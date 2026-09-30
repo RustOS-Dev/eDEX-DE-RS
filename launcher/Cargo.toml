@@ -8,6 +8,7 @@ repository.workspace = true
 description = "eDEX-DE app launcher"
 
 [dependencies]
+hypr = { path = "../hypr" }
 fuzzy-matcher = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -6,7 +6,7 @@ pub mod socket;
 
 pub use events::HyprEvent;
 pub use model::{HyprState, MonitorInfo, WorkspaceInfo};
-pub use socket::HyprSocket;
+pub use socket::{lua_string, HyprSocket};
 
 use std::path::PathBuf;
 

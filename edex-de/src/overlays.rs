@@ -137,11 +137,7 @@ fn run_power(app: &mut App, platform: &mut Platform<AppEvent>, action: PowerActi
             );
         }
         PowerAction::Logout => {
-            let ok = app
-                .hypr
-                .as_ref()
-                .map(|h| h.dispatch("exit").is_ok())
-                .unwrap_or(false);
+            let ok = app.hypr.as_ref().map(|h| h.exit().is_ok()).unwrap_or(false);
             if !ok {
                 let _ = launcher::runner::spawn_detached(
                     "loginctl terminate-session \"$XDG_SESSION_ID\"",

@@ -724,8 +724,17 @@ impl App {
         }
     }
 
-    /// Move keyboard focus to the shell canvas (from an app window or at login).
+    /// Move keyboard focus to the shell canvas (from an app window or at login). Apps tile over
+    /// the terminal, so when this workspace has windows switch to an empty one first, where the
+    /// terminal is visible (SUPER+1..9 goes back).
     pub fn focus_shell(&mut self, platform: &mut Platform<AppEvent>) {
+        if let Some(h) = &self.hypr {
+            if h.active_workspace_windows().unwrap_or(0) > 0 {
+                if let Err(e) = h.focus_empty_workspace() {
+                    warn!("switching to an empty workspace: {e:#}");
+                }
+            }
+        }
         if let Some(canvas) = self.primary().map(|s| s.canvas) {
             if self.focus_surface != Some(canvas) {
                 platform.grab_keyboard(canvas);

@@ -1251,6 +1251,7 @@ version = "3.0.0"
 dependencies = [
  "anyhow",
  "fuzzy-matcher",
+ "hypr",
  "libc",
  "rustix",
  "serde",
