@@ -63,8 +63,21 @@ pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
             }
         }
     }
-    let mut child = Command::new("setsid")
-        .arg("-f")
+    // In its own transient scope when systemd is around: otherwise the app lives in the shell's
+    // service cgroup and a shell restart (or crash + Restart=on-failure) would kill it.
+    let mut launcher = Command::new("setsid");
+    launcher.arg("-f");
+    if in_systemd_user_session() {
+        launcher.args([
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            "--",
+        ]);
+    }
+    let mut child = launcher
         .arg("sh")
         .arg("-c")
         .arg(cmd)
@@ -78,6 +91,13 @@ pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+fn in_systemd_user_session() -> bool {
+    let bus = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(|d| PathBuf::from(d).join("systemd/private"))
+        .is_some_and(|p| p.exists());
+    bus && std::path::Path::new("/usr/bin/systemd-run").exists()
 }
 
 /// Path of the launch history file.
