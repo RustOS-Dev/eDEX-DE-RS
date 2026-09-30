@@ -43,7 +43,7 @@ impl Default for LayoutConfig {
         Self {
             fs_split: 0.20,
             sysinfo_split: 0.78,
-            keyboard_visible: true,
+            keyboard_visible: false,
         }
     }
 }
@@ -142,7 +142,11 @@ mod tests {
     #[test]
     fn layout_snapshots() {
         let m = Metrics::default();
-        let cfg = LayoutConfig::default();
+        // With the (optional) on-screen keyboard, the fullest layout.
+        let cfg = LayoutConfig {
+            keyboard_visible: true,
+            ..LayoutConfig::default()
+        };
         for (w, h) in [
             (1280.0, 720.0),
             (1920.0, 1080.0),

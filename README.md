@@ -20,7 +20,7 @@ with Hyprland 0.55 or newer.
 | Terminal | Multi-tab terminal on `alacritty_terminal` (alt screen, scroll regions, mouse reporting, bracketed paste, OSC 52, selection, scrollback) |
 | Files | Clickable file browser with breadcrumbs, dotfiles toggle, open-in-terminal, `xdg-open` |
 | Dashboard | CPU per core, memory, network sparklines, disks, processes; privacy indicators for Tor, Tailscale, VPN, WireGuard, fprintd, microphone and camera |
-| Keyboard | On-screen hex keyboard: clickable keys inject into the terminal, physical keys light up |
+| Keyboard | Optional on-screen hex keyboard for touchscreens (Settings → Appearance, or `Ctrl+Shift+K`); off by default |
 | Launcher | Fuzzy search over XDG desktop entries with launch history (`SUPER+Space`) |
 | Settings | 14 categories wired to real backends: appearance, display, input, audio (wpctl), network (nmcli), bluetooth (bluetoothctl), power (upower/logind/power-profiles), security (hyprlock, fprintd), users, notifications, services (systemd), window manager, terminal, about |
 | Privacy | Tor modes (off / socks5 / transparent), bootstrap and circuit state, NEWNYM, bridges; Tailscale login, exit nodes, peers; NetworkManager VPNs; DNS and firewall status |
@@ -131,7 +131,7 @@ font_size = 14.0
 border_glow = 0.8
 scanlines = true
 animations = true
-keyboard_visible = true
+keyboard_visible = false  # on-screen hex keyboard, for touchscreens
 boot_animation = true
 
 [layout]

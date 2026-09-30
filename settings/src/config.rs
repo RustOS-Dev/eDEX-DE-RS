@@ -25,7 +25,8 @@ impl Default for Appearance {
             border_glow: 0.8,
             scanlines: true,
             animations: true,
-            keyboard_visible: true,
+            // The hex keyboard is for touchscreens; off unless the user turns it on.
+            keyboard_visible: false,
             boot_animation: true,
         }
     }

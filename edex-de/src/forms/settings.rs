@@ -297,7 +297,7 @@ fn appearance(app: &App) -> Form {
             vec![
                 toggle(
                     id::KEYBOARD,
-                    "On-screen keyboard",
+                    "On-screen keyboard (touchscreens)",
                     c.appearance.keyboard_visible,
                 ),
                 toggle(
