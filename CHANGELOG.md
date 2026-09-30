@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.0 — 2026-09-30
+
+First stable release of the Hyprland shell: everything in 3.0.0-rc.1, plus
+
+* Hyprland config modules are namespaced and loaded with `require` from `/usr/share/edex-de/hypr`;
+  unknown config keys removed (checked with `Hyprland --verify-config`).
+* `build-pkg.sh` honours `PKGDEST`.
+* Release workflow: the Debian build skips the apt Build-Depends check (Rust comes from rustup), package
+  tests are not re-run after CI, and AUR publishing sees its deploy key.
+
+Shipped in eDEX-OS 1.0.0; tested there in QEMU (live session, greeter, installed system). Not yet tested
+on real GPUs.
+
 ## 3.0.0-rc.1 — 2026-09-28
 
 Complete rewrite as a shell on Hyprland.

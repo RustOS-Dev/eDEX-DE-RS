@@ -45,7 +45,8 @@ jobs:
           git archive --format=tar --prefix=edex-de-$V/ HEAD | tar -x -C build-deb
           cp -r packaging/debian build-deb/edex-de-$V/debian
           cd build-deb/edex-de-$V
-          dpkg-buildpackage -us -uc -b
+          # Rust comes from rustup, not apt: skip the Build-Depends check; CI already ran the tests.
+          DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b -d
           cp ../*.deb ../../dist/
       - name: RPM package
         run: |
@@ -53,14 +54,14 @@ jobs:
           mkdir -p ~/rpmbuild/{SOURCES,SPECS}
           git archive --format=tar.gz --prefix=eDEX-DE-$V/ HEAD > ~/rpmbuild/SOURCES/v$V.tar.gz
           sed "s/^Version:.*/Version:        $V/" packaging/rpm/edex-de.spec > ~/rpmbuild/SPECS/edex-de.spec
-          rpmbuild -bb --nodeps ~/rpmbuild/SPECS/edex-de.spec
+          rpmbuild -bb --nodeps --nocheck ~/rpmbuild/SPECS/edex-de.spec
           cp ~/rpmbuild/RPMS/x86_64/*.rpm dist/
       - name: Checksums
         run: cd dist && sha256sum *.tar.gz *.deb *.rpm > SHA256SUMS
       - name: Release notes
         run: |
           V=${GITHUB_REF_NAME#v}
-          awk -v v="$V" 'BEGIN{p=0} /^## /{p = index($0, v) > 0} p' CHANGELOG.md > dist/notes.md
+          awk -v v="$V" 'BEGIN{p=0} /^## /{p = ($2 == v)} p' CHANGELOG.md > dist/notes.md
           [ -s dist/notes.md ] || echo "eDEX-DE $V" > dist/notes.md
       - uses: softprops/action-gh-release@v2
         with:
@@ -76,6 +77,9 @@ jobs:
     needs: release
     runs-on: ubuntu-24.04
     if: ${{ !contains(github.ref_name, '-') }}
+    # Job-level so the publish step's `if:` can see it (step-level env is not visible there).
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: PKGBUILD with real checksum
@@ -88,8 +92,6 @@ jobs:
       - name: Publish to AUR
         if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
         uses: KSXGitHub/github-actions-deploy-aur@v3
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         with:
           pkgname: edex-de
           pkgbuild: ./PKGBUILD
