@@ -3,7 +3,7 @@
 %{!?_tmpfilesdir:%global _tmpfilesdir %{_prefix}/lib/tmpfiles.d}
 
 Name:           edex-de
-Version:        3.0.0
+Version:        3.1.0
 Release:        1%{?dist}
 Summary:        eDEX-DE - sci-fi desktop shell for Hyprland
 License:        GPL-3.0-only
@@ -71,5 +71,8 @@ install -Dm644 assets/logo.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/ap
 %{_datadir}/icons/hicolor/*/apps/edex-de.*
 
 %changelog
+* Wed Sep 30 2026 eDEX-OS <edex-de@github.com> - 3.1.0-1
+- Working keyboard and pointer input; on-screen keyboard opt-in; Hyprland 0.56 Lua dispatch
+
 * Mon Sep 28 2026 eDEX-OS <edex-de@github.com> - 3.0.0-1
 - Rewrite as a Rust shell on Hyprland; greetd greeter; settings and privacy panels

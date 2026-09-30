@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.1.0 — 2026-09-30
+
+* **Input works.** Seats that already existed when the shell connected were ignored, so no keyboard
+  or pointer was ever created: clicks and typing did nothing (the greeter shares the code). The
+  terminal also has keyboard focus from login.
+* **Windows key.** Tapping SUPER on its own opens the launcher; SUPER+Return switches to an empty
+  workspace to show and focus the terminal when apps cover it.
+* **Hyprland 0.56 dispatch.** Workspace buttons, Log out, launching apps and hypridle's screen
+  off/on used the pre-0.55 string syntax and failed; they now use Lua dispatchers.
+* **On-screen keyboard** is off by default: an opt-in setting for touchscreens (Settings →
+  Appearance, or Ctrl+Shift+K).
+* **Terminal** answers device-attribute, cursor-position, colour and size queries (fish no longer
+  waits 10 s at startup).
+* **Idle CPU.** Redraws only when something visibly changes; the border pulse is off on software
+  renderers (llvmpipe idle CPU 108% → 14%).
+* Apps launched outside Hyprland get their own systemd scope and survive a shell restart; the
+  settings theme list no longer overlaps the next field.
+* Release workflow: `ci.yml` is callable (`workflow_call`), so tag pushes run the release job
+  (v3.0.0 was never published for this reason).
+
 ## 3.0.0 — 2026-09-30
 
 First stable release of the Hyprland shell: everything in 3.0.0-rc.1, plus

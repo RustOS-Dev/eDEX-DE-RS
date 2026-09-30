@@ -582,7 +582,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "edex-de"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "calloop",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "edex-greeter"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "calloop",
@@ -1059,7 +1059,7 @@ dependencies = [
 
 [[package]]
 name = "hypr"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1149,7 +1149,7 @@ dependencies = [
 
 [[package]]
 name = "ipc"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1247,7 +1247,7 @@ dependencies = [
 
 [[package]]
 name = "launcher"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "fuzzy-matcher",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "notifications"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -1693,7 +1693,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "platform"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "calloop",
@@ -1896,7 +1896,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderer"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2057,7 +2057,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "insta",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "sysmon"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "sysinfo",
  "tracing",
@@ -2279,7 +2279,7 @@ dependencies = [
 
 [[package]]
 name = "system"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "async-io",
@@ -2312,7 +2312,7 @@ dependencies = [
 
 [[package]]
 name = "terminal"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -2533,7 +2533,7 @@ dependencies = [
 
 [[package]]
 name = "ui"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "anyhow",
  "chrono",
