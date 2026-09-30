@@ -70,10 +70,7 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
                 "filesystem" | "files" => app.state.focus = PanelFocus::Filesystem,
                 other => return Response::err(format!("unknown focus target {other}")),
             }
-            if let Some(h) = &app.hypr {
-                // Give keyboard focus to the shell canvas.
-                let _ = h.dispatch("focuswindow address:none");
-            }
+            app.focus_shell(platform);
             app.mark_canvas_dirty();
             Response::ok()
         }
@@ -218,6 +215,7 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "overlay": app.state.overlay.map(|k| format!("{k:?}").to_lowercase()),
         "focus": format!("{:?}", app.state.focus).to_lowercase(),
         "terminal": {"tabs": app.terminal.len(), "active": app.terminal.active_index(), "grid": app.terminal.grid_size(), "title": app.state.terminal.frame.title},
+        "input": {"keyboard": platform.input_devices().0, "pointer": platform.input_devices().1, "shell_focused": app.state.shell_focused},
         "toasts": app.state.toasts.len(),
         "notifications_received": app.smoke_toasts_seen,
         "notification_server": app.notif_server.as_ref().map(|s| s.is_owner()).unwrap_or(false),

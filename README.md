@@ -21,7 +21,7 @@ with Hyprland 0.55 or newer.
 | Files | Clickable file browser with breadcrumbs, dotfiles toggle, open-in-terminal, `xdg-open` |
 | Dashboard | CPU per core, memory, network sparklines, disks, processes; privacy indicators for Tor, Tailscale, VPN, WireGuard, fprintd, microphone and camera |
 | Keyboard | Optional on-screen hex keyboard for touchscreens (Settings → Appearance, or `Ctrl+Shift+K`); off by default |
-| Launcher | Fuzzy search over XDG desktop entries with launch history (`SUPER+Space`) |
+| Launcher | Fuzzy search over XDG desktop entries with launch history (tap `SUPER`, or `SUPER+Space`) |
 | Settings | 14 categories wired to real backends: appearance, display, input, audio (wpctl), network (nmcli), bluetooth (bluetoothctl), power (upower/logind/power-profiles), security (hyprlock, fprintd), users, notifications, services (systemd), window manager, terminal, about |
 | Privacy | Tor modes (off / socks5 / transparent), bootstrap and circuit state, NEWNYM, bridges; Tailscale login, exit nodes, peers; NetworkManager VPNs; DNS and firewall status |
 | Notifications | eDEX-DE is the `org.freedesktop.Notifications` server: toasts, actions, history, do-not-disturb, per-app mute |
@@ -91,7 +91,7 @@ Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/us
 
 | Keys | Action |
 |---|---|
-| `SUPER+Space` | Launcher |
+| `SUPER` (tap) or `SUPER+Space` | Launcher |
 | `SUPER+,` | Settings |
 | `SUPER+P` | Privacy panel |
 | `SUPER+N` | Notification history |

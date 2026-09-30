@@ -67,6 +67,24 @@ impl Palette {
         }
     }
 
+    /// The colour an application asked about with OSC 4/10/11/12: indices 0-255 are the
+    /// indexed palette, higher ones follow alacritty's `NamedColor` numbering.
+    pub fn rgb_for_index(&self, index: usize) -> Rgb {
+        let c = match index {
+            0..=255 => self.indexed(index as u8, false),
+            i if i == NamedColor::Foreground as usize => self.fg,
+            i if i == NamedColor::Background as usize => self.bg,
+            i if i == NamedColor::Cursor as usize => self.cursor,
+            _ => self.fg,
+        };
+        let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        Rgb {
+            r: b(c[0]),
+            g: b(c[1]),
+            b: b(c[2]),
+        }
+    }
+
     fn indexed(&self, i: u8, bold: bool) -> UiColor {
         match i {
             0..=7 if bold => self.ansi[i as usize + 8],

@@ -110,11 +110,16 @@ pub struct App {
     pub last_click: Option<(Instant, f64, f64, u8)>,
     pub button_held: bool,
     pub last_input: Instant,
+    /// Last drawn cursor visibility and pulse level: animation ticks redraw only on change.
+    last_cursor_visible: bool,
+    last_pulse: f32,
     pub started: Instant,
     pub quit: bool,
     pub frames: u64,
     pub tx: Arc<Mutex<channel::Sender<AppEvent>>>,
     pub focus_surface: Option<SurfaceId>,
+    /// Canvas holding a temporary exclusive keyboard grab until focus arrives.
+    focus_grab: Option<SurfaceId>,
     pub install_button: bool,
     pub smoke_toasts_seen: usize,
     pub scratch: crate::forms::settings::SettingsScratch,
@@ -268,6 +273,9 @@ impl App {
             last_click: None,
             button_held: false,
             last_input: Instant::now(),
+            last_cursor_visible: true,
+            focus_grab: None,
+            last_pulse: -1.0,
             started: Instant::now(),
             quit: false,
             frames: 0,
@@ -370,6 +378,11 @@ impl App {
             }
         }
         info!(output = %name, %lw, %lh, "shell surfaces created");
+        if self.outputs.is_empty() {
+            // Start with the terminal focused so the user can type right away.
+            platform.grab_keyboard(canvas);
+            self.focus_grab = Some(canvas);
+        }
         self.outputs.push(OutputShell {
             output,
             name,
@@ -711,6 +724,16 @@ impl App {
         }
     }
 
+    /// Move keyboard focus to the shell canvas (from an app window or at login).
+    pub fn focus_shell(&mut self, platform: &mut Platform<AppEvent>) {
+        if let Some(canvas) = self.primary().map(|s| s.canvas) {
+            if self.focus_surface != Some(canvas) {
+                platform.grab_keyboard(canvas);
+                self.focus_grab = Some(canvas);
+            }
+        }
+    }
+
     fn cursor_visible(&self) -> bool {
         if !self.config.terminal.cursor_blink || !self.terminal.cursor_blinks() {
             return true;
@@ -747,7 +770,8 @@ impl App {
             keyboard_visible: c.appearance.keyboard_visible,
         };
         self.state.scanlines = c.appearance.scanlines;
-        self.state.animations = c.appearance.animations;
+        // A software renderer redraws the whole canvas on the CPU: no continuous border pulse there.
+        self.state.animations = c.appearance.animations && !self.gpu.is_software();
         self.terminal.set_config(terminal_config(c));
         apply_notification_config(&mut self.store, c);
         self.state.notifications.dnd = self.store.dnd;
@@ -904,15 +928,29 @@ impl App {
                     self.state.boot.update(now);
                     dirty = true;
                 }
-                if self.state.animations {
+                if self.state.animations && self.gpu.is_software() {
+                    // The adapter is only known after the first surface is configured.
+                    info!("software renderer: border pulse disabled to save CPU");
+                    self.state.animations = false;
                     dirty = true;
                 }
-                if self.config.terminal.cursor_blink && self.terminal.cursor_blinks() {
+                let mut pulse_changed = false;
+                if self.state.animations {
+                    let pulse = self.state.pulse();
+                    if pulse != self.last_pulse {
+                        self.last_pulse = pulse;
+                        pulse_changed = true;
+                        dirty = true;
+                    }
+                }
+                let cursor = self.cursor_visible();
+                if cursor != self.last_cursor_visible {
+                    self.last_cursor_visible = cursor;
                     dirty = true;
                 }
                 if dirty {
                     self.mark_canvas_dirty();
-                    if self.state.animations {
+                    if pulse_changed {
                         self.mark_overlay_dirty();
                     }
                 }
@@ -989,6 +1027,10 @@ impl App {
             }
             PlatformEvent::KeyboardEnter { surface } => {
                 self.focus_surface = Some(surface);
+                if self.focus_grab == Some(surface) {
+                    platform.release_keyboard_grab(surface);
+                    self.focus_grab = None;
+                }
                 if platform.surface_role(surface) == Some(SurfaceRole::Canvas) {
                     self.state.shell_focused = true;
                 }
@@ -1084,6 +1126,10 @@ impl App {
                         platform.request_paste();
                     }
                     _ => {}
+                }
+                if matches!(e, TermEvent::ColorRequest(..)) {
+                    self.terminal
+                        .set_palette(terminal::Palette::from_theme(&self.state.theme));
                 }
                 if self.terminal.handle_event(e) {
                     self.mark_canvas_dirty();

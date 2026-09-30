@@ -15,7 +15,7 @@ use alacritty_terminal::{
     sync::FairMutex,
     term::{self, Config as TermConfig, Term, TermMode},
     tty,
-    vte::ansi::{CursorShape as AlacCursorShape, CursorStyle},
+    vte::ansi::{CursorShape as AlacCursorShape, CursorStyle, Rgb},
 };
 use anyhow::{Context, Result};
 use tracing::{info, warn};
@@ -72,6 +72,10 @@ impl Default for TerminalConfig {
 
 /// Formatter turning clipboard text into the escape sequence an application requested.
 pub type ClipboardFormatter = Arc<dyn Fn(&str) -> String + Sync + Send + 'static>;
+/// Formatter for an OSC 4/10/11/12 colour query reply.
+pub type ColorFormatter = Arc<dyn Fn(Rgb) -> String + Sync + Send + 'static>;
+/// Formatter for a text-area size (CSI 14/18 t) query reply.
+pub type SizeFormatter = Arc<dyn Fn(WindowSize) -> String + Sync + Send + 'static>;
 
 /// Events delivered from PTY threads to the main loop.
 #[derive(Clone)]
@@ -83,6 +87,11 @@ pub enum TermEvent {
     ClipboardStore(String),
     ClipboardLoad(u64, ClipboardFormatter),
     CursorBlinkingChange(u64),
+    /// Bytes the terminal must send back to the application (device attributes, cursor
+    /// position reports, mode reports...).
+    PtyWrite(u64, String),
+    ColorRequest(u64, usize, ColorFormatter),
+    TextAreaSize(u64, SizeFormatter),
 }
 
 impl std::fmt::Debug for TermEvent {
@@ -95,6 +104,9 @@ impl std::fmt::Debug for TermEvent {
             TermEvent::ClipboardStore(_) => write!(f, "ClipboardStore"),
             TermEvent::ClipboardLoad(id, _) => write!(f, "ClipboardLoad({id})"),
             TermEvent::CursorBlinkingChange(id) => write!(f, "CursorBlinkingChange({id})"),
+            TermEvent::PtyWrite(id, s) => write!(f, "PtyWrite({id}, {s:?})"),
+            TermEvent::ColorRequest(id, i, _) => write!(f, "ColorRequest({id}, {i})"),
+            TermEvent::TextAreaSize(id, _) => write!(f, "TextAreaSize({id})"),
         }
     }
 }
@@ -127,11 +139,14 @@ impl EventListener for Listener {
             AlacEvent::ClipboardStore(_, text) => TermEvent::ClipboardStore(text),
             AlacEvent::ClipboardLoad(_, formatter) => TermEvent::ClipboardLoad(self.id, formatter),
             AlacEvent::CursorBlinkingChange => TermEvent::CursorBlinkingChange(self.id),
-            AlacEvent::PtyWrite(_)
-            | AlacEvent::MouseCursorDirty
-            | AlacEvent::ColorRequest(..)
-            | AlacEvent::TextAreaSizeRequest(_)
-            | AlacEvent::Exit => return,
+            AlacEvent::PtyWrite(text) => TermEvent::PtyWrite(self.id, text),
+            AlacEvent::ColorRequest(index, formatter) => {
+                TermEvent::ColorRequest(self.id, index, formatter)
+            }
+            AlacEvent::TextAreaSizeRequest(formatter) => {
+                TermEvent::TextAreaSize(self.id, formatter)
+            }
+            AlacEvent::MouseCursorDirty | AlacEvent::Exit => return,
         };
         self.sink.send(out);
     }
@@ -187,6 +202,7 @@ pub struct TerminalTabs {
     config: TerminalConfig,
     sink: Arc<dyn EventSink>,
     ids: HashMap<u64, usize>,
+    palette: Option<Palette>,
 }
 
 impl TerminalTabs {
@@ -212,6 +228,7 @@ impl TerminalTabs {
             config,
             sink,
             ids: HashMap::new(),
+            palette: None,
         };
         tabs.new_tab()?;
         Ok(tabs)
@@ -763,8 +780,36 @@ impl TerminalTabs {
                 }
                 false
             }
+            TermEvent::PtyWrite(id, text) => {
+                if let Some(&i) = self.ids.get(&id) {
+                    self.tabs[i].write(text.into_bytes());
+                }
+                false
+            }
+            TermEvent::ColorRequest(id, index, formatter) => {
+                if let Some(&i) = self.ids.get(&id) {
+                    let set = self.tabs[i].term.lock().colors()[index];
+                    let rgb = set.or_else(|| self.palette.as_ref().map(|p| p.rgb_for_index(index)));
+                    if let Some(rgb) = rgb {
+                        self.tabs[i].write(formatter(rgb).into_bytes());
+                    }
+                }
+                false
+            }
+            TermEvent::TextAreaSize(id, formatter) => {
+                if let Some(&i) = self.ids.get(&id) {
+                    let reply = formatter(self.window_size());
+                    self.tabs[i].write(reply.into_bytes());
+                }
+                false
+            }
             TermEvent::ClipboardStore(_) | TermEvent::CursorBlinkingChange(_) => true,
         }
+    }
+
+    /// Theme palette used to answer colour queries (OSC 4/10/11/12).
+    pub fn set_palette(&mut self, palette: Palette) {
+        self.palette = Some(palette);
     }
 
     /// Build the frame for the active tab.
@@ -817,6 +862,7 @@ fn child_cwd(tab: &Tab) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use alacritty_terminal::event::VoidListener;
+    use alacritty_terminal::vte::ansi::NamedColor;
 
     fn palette() -> Palette {
         Palette {
@@ -825,6 +871,66 @@ mod tests {
             cursor: [0.0, 1.0, 1.0, 1.0],
             ansi: [[0.5, 0.5, 0.5, 1.0]; 16],
         }
+    }
+
+    /// Device-attribute queries must produce a reply for the application (fish, vim and
+    /// others wait for it).
+    #[test]
+    fn device_attribute_query_is_answered() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = {
+            let events = events.clone();
+            move |e: TermEvent| events.lock().unwrap().push(e)
+        };
+        let listener = Listener {
+            id: 7,
+            sink: Arc::new(sink),
+        };
+        let mut term = Term::new(
+            TermConfig::default(),
+            &GridSize { cols: 20, rows: 5 },
+            listener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
+        parser.advance(&mut term, b"\x1b[c\x1b[6n");
+        let got: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                TermEvent::PtyWrite(7, s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[0].starts_with("\x1b[?"), "{got:?}");
+        assert_eq!(got[1], "\x1b[1;1R");
+    }
+
+    #[test]
+    fn colour_queries_resolve_from_the_palette() {
+        let p = palette();
+        assert_eq!(
+            p.rgb_for_index(NamedColor::Background as usize),
+            Rgb { r: 0, g: 0, b: 0 }
+        );
+        assert_eq!(
+            p.rgb_for_index(NamedColor::Foreground as usize),
+            Rgb {
+                r: 255,
+                g: 255,
+                b: 255
+            }
+        );
+        assert_eq!(
+            p.rgb_for_index(3),
+            Rgb {
+                r: 128,
+                g: 128,
+                b: 128
+            }
+        );
     }
 
     fn term_with(bytes: &[u8], cols: usize, rows: usize) -> Term<VoidListener> {

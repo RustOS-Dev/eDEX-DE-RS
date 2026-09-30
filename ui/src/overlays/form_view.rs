@@ -113,7 +113,7 @@ fn draw_form(ctx: &mut Ctx, area: Rect, forms: &TabbedForms) {
             y += line * 1.6;
         }
         for control in &section.controls {
-            let height = control_height(control, line, row_h);
+            let height = control_height(control, line, row_h, value_w, ctx.metrics.cell_w);
             let r = Rect::new(area.x, y, area.w, height);
             if r.bottom() > area.y && r.y < area.bottom() {
                 let focused = fs.focused == Some(control.id);
@@ -204,8 +204,7 @@ fn draw_form(ctx: &mut Ctx, area: Rect, forms: &TabbedForms) {
                         let cy = r.y + (row_h - line * 1.3) / 2.0;
                         let mut wrapped = 0.0;
                         for (i, opt) in options.iter().enumerate() {
-                            let w = (opt.chars().count() as f32 * ctx.metrics.cell_w * 0.9).round()
-                                + 18.0;
+                            let w = chip_width(opt, ctx.metrics.cell_w);
                             if cx + w > value_x + value_w && cx > value_x {
                                 cx = value_x;
                                 wrapped += line * 1.5;
@@ -381,7 +380,32 @@ fn draw_form(ctx: &mut Ctx, area: Rect, forms: &TabbedForms) {
     }
 }
 
-pub fn control_height(control: &crate::form::Control, line: f32, row_h: f32) -> f32 {
+fn chip_width(option: &str, cell_w: f32) -> f32 {
+    (option.chars().count() as f32 * cell_w * 0.9).round() + 18.0
+}
+
+/// Rows a choice control's chips wrap onto, using the same flow as the drawing code.
+fn choice_rows(options: &[String], value_w: f32, cell_w: f32) -> usize {
+    let mut rows = 1;
+    let mut x = 0.0;
+    for opt in options {
+        let w = chip_width(opt, cell_w);
+        if x + w > value_w && x > 0.0 {
+            rows += 1;
+            x = 0.0;
+        }
+        x += w + 6.0;
+    }
+    rows
+}
+
+pub fn control_height(
+    control: &crate::form::Control,
+    line: f32,
+    row_h: f32,
+    value_w: f32,
+    cell_w: f32,
+) -> f32 {
     match &control.kind {
         ControlKind::Separator => line * 0.8,
         ControlKind::Note(text) => {
@@ -391,22 +415,14 @@ pub fn control_height(control: &crate::form::Control, line: f32, row_h: f32) -> 
             line + 6.0 + items.len().max(1) as f32 * (line * 1.5 + 2.0) + 6.0
         }
         ControlKind::Choice { options, .. } => {
-            let approx: f32 = options
-                .iter()
-                .map(|o| o.chars().count() as f32 * 8.0 + 24.0)
-                .sum();
-            if approx > 520.0 {
-                row_h + line * 1.5
-            } else {
-                row_h
-            }
+            row_h + (choice_rows(options, value_w, cell_w) - 1) as f32 * line * 1.5
         }
         _ => row_h,
     }
 }
 
 /// Total form height, used for scroll clamping.
-pub fn form_height(forms: &TabbedForms, line: f32) -> f32 {
+pub fn form_height(forms: &TabbedForms, line: f32, value_w: f32, cell_w: f32) -> f32 {
     let row_h = line * 1.9;
     let mut h = 0.0;
     for section in &forms.form.sections {
@@ -414,9 +430,60 @@ pub fn form_height(forms: &TabbedForms, line: f32) -> f32 {
             h += line * 1.6;
         }
         for c in &section.controls {
-            h += control_height(c, line, row_h);
+            h += control_height(c, line, row_h, value_w, cell_w);
         }
         h += line * 0.5;
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn themes() -> Vec<String> {
+        [
+            "amber",
+            "apollo",
+            "blade",
+            "cyborg",
+            "horizon",
+            "interstellar",
+            "matrix",
+            "navy",
+            "nord",
+            "purple",
+            "red",
+            "tron",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    /// The reserved height must fit every wrapped row, or chips overlap the next control.
+    #[test]
+    fn choice_height_covers_all_wrapped_rows() {
+        let (line, row_h, cell_w) = (18.0, 18.0 * 1.9, 8.4);
+        for value_w in [240.0, 380.0, 520.0, 900.0] {
+            let rows = choice_rows(&themes(), value_w, cell_w);
+            let control = crate::form::Control::new(
+                1,
+                "Theme",
+                ControlKind::Choice {
+                    options: themes(),
+                    selected: 0,
+                },
+            );
+            let h = control_height(&control, line, row_h, value_w, cell_w);
+            let last_row_bottom =
+                (row_h - line * 1.3) / 2.0 + (rows - 1) as f32 * line * 1.5 + line * 1.3;
+            assert!(
+                h >= last_row_bottom,
+                "width {value_w}: {rows} rows need {last_row_bottom}, got {h}"
+            );
+        }
+        assert_eq!(choice_rows(&themes(), 380.0, 8.4), 3);
+        assert_eq!(choice_rows(&themes(), 2000.0, 8.4), 1);
+    }
 }

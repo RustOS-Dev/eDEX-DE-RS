@@ -61,6 +61,13 @@ impl GpuContext {
         self.font_family = family;
     }
 
+    /// True when rendering runs on the CPU (llvmpipe/lavapipe: VMs, missing GPU drivers).
+    pub fn is_software(&self) -> bool {
+        self.adapter
+            .as_ref()
+            .is_some_and(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+    }
+
     /// Adapter description for the About page.
     pub fn adapter_info(&self) -> Option<String> {
         self.adapter.as_ref().map(|a| {

@@ -5,7 +5,9 @@ local ipc = function(args)
     return hl.dsp.exec_cmd("edex-de ipc " .. args)
 end
 
--- Shell overlays
+-- Shell overlays. Tapping the Super (Windows) key on its own opens the launcher; it fires on
+-- release and not when Super is used in a combination.
+hl.bind(mod .. " + Super_L", ipc("toggle launcher"), { release = true })
 hl.bind(mod .. " + space", ipc("toggle launcher"))
 hl.bind(mod .. " + comma", ipc("toggle settings"))
 hl.bind(mod .. " + P", ipc("toggle privacy"))

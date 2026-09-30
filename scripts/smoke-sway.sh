@@ -6,7 +6,7 @@ set -euo pipefail
 
 BIN=${1:-target/debug/edex-de}
 OUT=${2:-target/smoke}
-SECS=${SMOKE_SECS:-14}
+SECS=${SMOKE_SECS:-18}
 mkdir -p "$OUT"
 export XDG_RUNTIME_DIR=$(mktemp -d /tmp/edex-smoke.XXXXXX)
 chmod 700 "$XDG_RUNTIME_DIR"
@@ -62,6 +62,18 @@ step "ping"
 
 step "screenshot: canvas"
 grim "$OUT/01-canvas.png" || fail=1
+
+# Real input devices: wtype adds a virtual keyboard to the seat after the shell has started.
+# The shell must pick it up (it once ignored every seat that existed before it connected, so
+# neither keyboard nor pointer ever worked). Typing itself is checked on Hyprland (docs/testing.md):
+# sway only grants exclusive keyboard focus to top/overlay layers and has no pointer here.
+step "keyboard device is picked up"
+wtype -s 4000 "x" &
+WTYPE_PID=$!
+sleep 2
+"$BIN" ipc state > "$OUT/state-input.json"
+grep -q '"keyboard":true' "$OUT/state-input.json" || { echo "shell did not take the seat keyboard"; cat "$OUT/state-input.json"; fail=1; }
+wait $WTYPE_PID || true
 
 step "notify-send → toast"
 notify-send -a smoke "Smoke test" "hello from notify-send" || fail=1

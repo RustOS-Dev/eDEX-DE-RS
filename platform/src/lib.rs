@@ -654,6 +654,25 @@ impl<E: 'static> Platform<E> {
         }
     }
 
+    /// Whether any seat currently gives us a keyboard / pointer object.
+    pub fn input_devices(&self) -> (bool, bool) {
+        (
+            self.seats.iter().any(|s| s.keyboard.is_some()),
+            self.seats.iter().any(|s| s.pointer.is_some()),
+        )
+    }
+
+    /// Ask for keyboard focus now (exclusive), e.g. for the canvas at login; undo with
+    /// [`Platform::release_keyboard_grab`] once focus has arrived.
+    pub fn grab_keyboard(&mut self, id: SurfaceId) {
+        self.set_keyboard_interactivity(id, KeyboardInteractivity::Exclusive);
+    }
+
+    /// Back to on-demand focus: the surface keeps focus until the user clicks elsewhere.
+    pub fn release_keyboard_grab(&mut self, id: SurfaceId) {
+        self.set_keyboard_interactivity(id, KeyboardInteractivity::OnDemand);
+    }
+
     pub fn set_layer(&mut self, id: SurfaceId, layer_kind: Layer) {
         if let Some(entry) = self.surfaces.get_mut(&id) {
             if let SurfaceKind::Layer(layer) = &entry.kind {
@@ -1102,23 +1121,34 @@ impl<E: 'static> WindowHandler for Platform<E> {
     }
 }
 
+impl<E: 'static> Platform<E> {
+    /// Index of the entry for `seat`, creating it (with its clipboard data device) if needed.
+    fn ensure_seat(&mut self, qh: &QueueHandle<Self>, seat: &wl_seat::WlSeat) -> usize {
+        if let Some(i) = self.seats.iter().position(|s| &s.seat == seat) {
+            return i;
+        }
+        let data_device = self
+            .data_device_manager
+            .as_ref()
+            .map(|m| m.get_data_device(qh, seat));
+        self.seats.push(SeatEntry {
+            seat: seat.clone(),
+            keyboard: None,
+            pointer: None,
+            data_device,
+            last_serial: 0,
+        });
+        self.seats.len() - 1
+    }
+}
+
 impl<E: 'static> SeatHandler for Platform<E> {
     fn seat_state(&mut self) -> &mut SeatState {
         &mut self.seat_state
     }
 
     fn new_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
-        let data_device = self
-            .data_device_manager
-            .as_ref()
-            .map(|m| m.get_data_device(qh, &seat));
-        self.seats.push(SeatEntry {
-            seat,
-            keyboard: None,
-            pointer: None,
-            data_device,
-            last_serial: 0,
-        });
+        self.ensure_seat(qh, &seat);
     }
 
     fn new_capability(
@@ -1129,9 +1159,10 @@ impl<E: 'static> SeatHandler for Platform<E> {
         capability: Capability,
     ) {
         let loop_handle = self.loop_handle.clone();
-        let Some(entry) = self.seats.iter_mut().find(|s| s.seat == seat) else {
-            return;
-        };
+        // sctk only calls `new_seat` for seats announced after startup; seats that already
+        // existed when we connected (the usual case) first show up here.
+        let idx = self.ensure_seat(qh, &seat);
+        let entry = &mut self.seats[idx];
         match capability {
             Capability::Keyboard if entry.keyboard.is_none() => {
                 match self.seat_state.get_keyboard_with_repeat(

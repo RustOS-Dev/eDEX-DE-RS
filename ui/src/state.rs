@@ -321,13 +321,14 @@ impl ShellState {
         }
     }
 
-    /// Border pulse phase in 0..1 derived from wall-clock time.
+    /// Border pulse phase in 0..1 derived from wall-clock time. Quantised to 32 levels so the
+    /// shell only redraws when the glow visibly changes (~8 times a second, not every tick).
     pub fn pulse(&self) -> f32 {
         if !self.animations {
             return 0.5;
         }
         let t = self.now.duration_since(self.boot_start()).as_secs_f32();
-        (t * 0.8).sin() * 0.5 + 0.5
+        (((t * 0.8).sin() * 0.5 + 0.5) * 32.0).round() / 32.0
     }
 
     fn boot_start(&self) -> Instant {
