@@ -37,6 +37,16 @@ mod id {
     pub const VPN_PATH: u32 = 202;
     pub const VPN_IMPORT: u32 = 203;
     pub const VPN_DELETE: u32 = 204;
+    pub const WG_LIST: u32 = 210;
+    pub const WG_NAME: u32 = 211;
+    pub const WG_ADDRESS: u32 = 212;
+    pub const WG_DNS: u32 = 213;
+    pub const WG_PEER_KEY: u32 = 214;
+    pub const WG_ENDPOINT: u32 = 215;
+    pub const WG_ALLOWED: u32 = 216;
+    pub const WG_KEEPALIVE: u32 = 217;
+    pub const WG_CREATE: u32 = 218;
+    pub const WG_DELETE: u32 = 219;
     pub const DNS_TEST: u32 = 301;
     pub const FP_ENROLLED: u32 = 401;
 }
@@ -47,6 +57,8 @@ pub struct PrivacyScratch {
     pub bridges: usize,
     pub vpn_path: String,
     pub pending_transparent: bool,
+    /// New WireGuard tunnel being filled in.
+    pub wg: system::network::WireguardSpec,
 }
 
 const MODES: [&str; 3] = ["off", "socks5", "transparent"];
@@ -255,49 +267,123 @@ fn tailscale(app: &App) -> Form {
         )
 }
 
-fn vpn(app: &App) -> Form {
-    let n = &app.sys.network;
-    let items = n
+fn wireguard_tunnels(app: &App) -> Vec<&system::network::Connection> {
+    app.sys
+        .network
         .vpn_connections
         .iter()
+        .filter(|c| c.kind == "wireguard")
+        .collect()
+}
+
+fn other_vpns(app: &App) -> Vec<&system::network::Connection> {
+    app.sys
+        .network
+        .vpn_connections
+        .iter()
+        .filter(|c| c.kind != "wireguard")
+        .collect()
+}
+
+fn vpn(app: &App) -> Form {
+    let conn_item = |c: &&system::network::Connection| {
+        item(
+            c.name.clone(),
+            c.kind.clone(),
+            c.active,
+            if c.active { Some("connected") } else { None },
+        )
+    };
+    let tunnels = wireguard_tunnels(app);
+    let wg_items = tunnels.iter().map(conn_item).collect();
+    let selected = tunnels.get(app.state.privacy.form_state.list_cursor(id::WG_LIST));
+    let public_key = selected
         .map(|c| {
-            item(
-                c.name.clone(),
-                c.kind.clone(),
-                c.active,
-                if c.active { Some("active") } else { None },
-            )
+            if c.wg_public_key.is_empty() {
+                "(not readable)".to_string()
+            } else {
+                c.wg_public_key.clone()
+            }
         })
-        .collect();
-    Form::default().section(
-        "VPN connections (NetworkManager)",
-        vec![
-            list(
-                id::VPN_LIST,
-                "Connections",
-                items,
-                Some("TOGGLE"),
-                "no VPN connections",
-            ),
-            text(
-                id::VPN_PATH,
-                "Import file",
-                &app.pscratch.vpn_path,
-                "/path/to/config.ovpn or wg.conf",
-            ),
-            button(id::VPN_IMPORT, "Import OpenVPN / WireGuard", "IMPORT"),
-            button(id::VPN_DELETE, "Selected connection", "DELETE"),
-            info(
-                0,
-                "WireGuard",
-                if app.state.status.wireguard_active {
-                    "interface up"
-                } else {
-                    "no interface"
-                },
-            ),
-        ],
-    )
+        .unwrap_or_else(|| "-".into());
+    let w = &app.pscratch.wg;
+    let other_items = other_vpns(app).iter().map(conn_item).collect();
+    Form::default()
+        .section(
+            "WireGuard",
+            vec![
+                list(
+                    id::WG_LIST,
+                    "Tunnels",
+                    wg_items,
+                    Some("TOGGLE"),
+                    "no tunnels yet: create one below or import a .conf",
+                ),
+                info(
+                    0,
+                    "Public key of the selected tunnel (add it on the server)",
+                    public_key,
+                ),
+                button(id::WG_DELETE, "Selected tunnel", "DELETE"),
+            ],
+        )
+        .section(
+            "New WireGuard tunnel",
+            vec![
+                text(id::WG_NAME, "Name (interface)", &w.name, "wg-home"),
+                text(id::WG_ADDRESS, "Address", &w.address, "10.8.0.2/32"),
+                text(id::WG_DNS, "DNS (optional)", &w.dns, "10.8.0.1"),
+                text(
+                    id::WG_PEER_KEY,
+                    "Server public key",
+                    &w.peer_public_key,
+                    "44-character base64 key",
+                ),
+                text(
+                    id::WG_ENDPOINT,
+                    "Server endpoint",
+                    &w.endpoint,
+                    "vpn.example.com:51820",
+                ),
+                text(
+                    id::WG_ALLOWED,
+                    "Allowed IPs",
+                    &w.allowed_ips,
+                    "0.0.0.0/0, ::/0 (all traffic)",
+                ),
+                text(
+                    id::WG_KEEPALIVE,
+                    "Keepalive seconds (optional)",
+                    &if w.keepalive > 0 {
+                        w.keepalive.to_string()
+                    } else {
+                        String::new()
+                    },
+                    "25",
+                ),
+                button(id::WG_CREATE, "Generate keys and create", "CREATE"),
+            ],
+        )
+        .section(
+            "Import and other VPNs (NetworkManager)",
+            vec![
+                list(
+                    id::VPN_LIST,
+                    "OpenVPN and other connections",
+                    other_items,
+                    Some("TOGGLE"),
+                    "no other VPN connections",
+                ),
+                text(
+                    id::VPN_PATH,
+                    "Import file",
+                    &app.pscratch.vpn_path,
+                    "/path/to/config.ovpn or wg0.conf",
+                ),
+                button(id::VPN_IMPORT, "Import OpenVPN / WireGuard file", "IMPORT"),
+                button(id::VPN_DELETE, "Selected connection", "DELETE"),
+            ],
+        )
 }
 
 fn dns(app: &App) -> Form {
@@ -474,14 +560,20 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
                 app.system.send(SysRequest::TailscaleAdvertiseExit(v));
             }
         }
-        id::VPN_LIST => {
+        id::VPN_LIST | id::WG_LIST => {
             if let Change::ListAction(i) = ch {
-                if let Some(c) = app.sys.network.vpn_connections.get(i) {
-                    app.system.send(if c.active {
+                let list = if id == id::WG_LIST {
+                    wireguard_tunnels(app)
+                } else {
+                    other_vpns(app)
+                };
+                if let Some(c) = list.get(i) {
+                    let req = if c.active {
                         SysRequest::ConnectionDown(c.name.clone())
                     } else {
                         SysRequest::ConnectionUp(c.name.clone())
-                    });
+                    };
+                    app.system.send(req);
                 }
             }
         }
@@ -497,13 +589,45 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
                 app.pscratch.vpn_path.clear();
             }
         }
-        id::VPN_DELETE => {
-            let cur = app.state.privacy.form_state.list_cursor(id::VPN_LIST);
-            if let Some(c) = app.sys.network.vpn_connections.get(cur) {
-                app.system
-                    .send(SysRequest::ConnectionDelete(c.name.clone()));
+        id::VPN_DELETE | id::WG_DELETE => {
+            let (list, list_id) = if id == id::WG_DELETE {
+                (wireguard_tunnels(app), id::WG_LIST)
+            } else {
+                (other_vpns(app), id::VPN_LIST)
+            };
+            let cur = app.state.privacy.form_state.list_cursor(list_id);
+            if let Some(name) = list.get(cur).map(|c| c.name.clone()) {
+                app.system.send(SysRequest::ConnectionDelete(name));
             }
         }
+        id::WG_NAME
+        | id::WG_ADDRESS
+        | id::WG_DNS
+        | id::WG_PEER_KEY
+        | id::WG_ENDPOINT
+        | id::WG_ALLOWED
+        | id::WG_KEEPALIVE => {
+            if let Change::Text(t) = ch {
+                let w = &mut app.pscratch.wg;
+                match id {
+                    id::WG_NAME => w.name = t,
+                    id::WG_ADDRESS => w.address = t,
+                    id::WG_DNS => w.dns = t,
+                    id::WG_PEER_KEY => w.peer_public_key = t,
+                    id::WG_ENDPOINT => w.endpoint = t,
+                    id::WG_ALLOWED => w.allowed_ips = t,
+                    _ => w.keepalive = t.trim().parse().unwrap_or(0),
+                }
+            }
+        }
+        id::WG_CREATE => match app.pscratch.wg.validate() {
+            Ok(()) => {
+                app.system
+                    .send(SysRequest::WireguardCreate(app.pscratch.wg.clone()));
+                app.pscratch.wg = Default::default();
+            }
+            Err(e) => app.state.privacy.status = Some(format!("WireGuard: {e}")),
+        },
         id::DNS_TEST => app.system.send(SysRequest::PrivacyQuery),
         _ => {}
     }

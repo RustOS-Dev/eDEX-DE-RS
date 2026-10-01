@@ -50,6 +50,7 @@ pub enum SysRequest {
     WifiRadio(bool),
     Airplane(bool),
     VpnImport(String),
+    WireguardCreate(network::WireguardSpec),
     BluetoothQuery,
     BluetoothPower(bool),
     BluetoothScan(bool),
@@ -265,6 +266,10 @@ fn handle(
         ],
         Q::Airplane(on) => vec![
             done("airplane", network::airplane(r, on)),
+            SysReply::Network(network::query(r, false)),
+        ],
+        Q::WireguardCreate(spec) => vec![
+            done("wireguard", network::wireguard_create(r, &spec).map(|_| ())),
             SysReply::Network(network::query(r, false)),
         ],
         Q::VpnImport(path) => vec![

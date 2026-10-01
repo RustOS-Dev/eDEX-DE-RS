@@ -58,7 +58,8 @@ impl PrivacyProbe {
         } else {
             tor_mode != "off" && tor_listening
         };
-        let tailscale = interface_up("tailscale0");
+        // tailscaled keeps tailscale0 up while logged out; it only gets an address when connected.
+        let tailscale = interface_up("tailscale0") && has_ipv4("tailscale0");
         let wireguard = wireguard_interfaces();
         let nm_vpn = nm_vpn_active();
         PrivacyStatus {
@@ -101,7 +102,7 @@ fn wireguard_interfaces() -> bool {
             || fs::read_to_string(e.path().join("uevent"))
                 .map(|u| u.contains("DEVTYPE=wireguard"))
                 .unwrap_or(false);
-        is_wg && interface_up(&name)
+        is_wg && interface_up(&name) && has_ipv4(&name)
     })
 }
 
@@ -112,8 +113,38 @@ fn nm_vpn_active() -> bool {
     };
     dir.flatten().any(|e| {
         let name = e.file_name().to_string_lossy().to_string();
-        (name.starts_with("tun") || name.starts_with("ppp")) && interface_up(&name)
+        (name.starts_with("tun") || name.starts_with("ppp"))
+            && interface_up(&name)
+            && has_ipv4(&name)
     })
+}
+
+/// Whether interface `name` has an IPv4 address (tunnels exist before they are connected).
+fn has_ipv4(name: &str) -> bool {
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    // SAFETY: getifaddrs fills `head` with a list we walk read-only and free once.
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return false;
+    }
+    let mut found = false;
+    let mut cur = head;
+    while !cur.is_null() {
+        // SAFETY: `cur` points into the list returned by getifaddrs.
+        let ifa = unsafe { &*cur };
+        if !ifa.ifa_addr.is_null() && !ifa.ifa_name.is_null() {
+            // SAFETY: non-null pointers from getifaddrs; ifa_name is a C string.
+            let family = unsafe { (*ifa.ifa_addr).sa_family } as i32;
+            let ifname = unsafe { std::ffi::CStr::from_ptr(ifa.ifa_name) };
+            if family == libc::AF_INET && ifname.to_bytes() == name.as_bytes() {
+                found = true;
+                break;
+            }
+        }
+        cur = ifa.ifa_next;
+    }
+    // SAFETY: freeing the list getifaddrs allocated.
+    unsafe { libc::freeifaddrs(head) };
+    found
 }
 
 /// Whether something listens on 127.0.0.1:`port` (parses /proc/net/tcp).

@@ -93,6 +93,17 @@ fn control_port(cmd: &str) -> Result<String> {
     Ok(out)
 }
 
+impl PrivacyState {
+    /// Only the cheap "is it installed" facts, for display before a full query has run.
+    pub fn installed_only() -> Self {
+        let mut s = Self::default();
+        s.tor.installed = std::path::Path::new("/usr/bin/tor").exists();
+        s.tor.mode = "off".into();
+        s.tailscale.installed = std::path::Path::new("/usr/bin/tailscale").exists();
+        s
+    }
+}
+
 pub fn tor_query(r: &dyn CommandRunner) -> TorState {
     let mut st = TorState {
         installed: std::path::Path::new("/usr/bin/tor").exists(),
@@ -186,37 +197,47 @@ pub fn tor_bridges(r: &dyn CommandRunner, kind: &str, lines: &str) -> Result<()>
 
 // ─── Tailscale ──────────────────────────────────────────────────────────────
 
+/// `tailscale status --json` uses `null` for empty lists and maps (e.g. TailscaleIPs and Peer
+/// while logged out); read those as the empty value instead of failing the whole parse.
+fn null_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Deserialize)]
 struct TsStatus {
-    #[serde(rename = "BackendState", default)]
+    #[serde(rename = "BackendState", default, deserialize_with = "null_default")]
     backend_state: String,
     #[serde(rename = "Self", default)]
     self_node: Option<TsNode>,
-    #[serde(rename = "Peer", default)]
+    #[serde(rename = "Peer", default, deserialize_with = "null_default")]
     peers: std::collections::HashMap<String, TsNode>,
     #[serde(rename = "ExitNodeStatus", default)]
     exit_node_status: Option<TsExitStatus>,
-    #[serde(rename = "MagicDNSSuffix", default)]
+    #[serde(rename = "MagicDNSSuffix", default, deserialize_with = "null_default")]
     magic_dns: String,
-    #[serde(rename = "AuthURL", default)]
+    #[serde(rename = "AuthURL", default, deserialize_with = "null_default")]
     auth_url: String,
 }
 
 #[derive(Deserialize, Clone)]
 struct TsNode {
-    #[serde(rename = "HostName", default)]
+    #[serde(rename = "HostName", default, deserialize_with = "null_default")]
     host_name: String,
-    #[serde(rename = "DNSName", default)]
+    #[serde(rename = "DNSName", default, deserialize_with = "null_default")]
     dns_name: String,
-    #[serde(rename = "OS", default)]
+    #[serde(rename = "OS", default, deserialize_with = "null_default")]
     os: String,
-    #[serde(rename = "TailscaleIPs", default)]
+    #[serde(rename = "TailscaleIPs", default, deserialize_with = "null_default")]
     ips: Vec<String>,
-    #[serde(rename = "Online", default)]
+    #[serde(rename = "Online", default, deserialize_with = "null_default")]
     online: bool,
-    #[serde(rename = "ExitNodeOption", default)]
+    #[serde(rename = "ExitNodeOption", default, deserialize_with = "null_default")]
     exit_node_option: bool,
-    #[serde(rename = "ExitNode", default)]
+    #[serde(rename = "ExitNode", default, deserialize_with = "null_default")]
     exit_node: bool,
 }
 
@@ -365,6 +386,17 @@ pub fn query(r: &dyn CommandRunner) -> PrivacyState {
 mod tests {
     use super::*;
     use crate::runner::FakeRunner;
+
+    /// Logged-out output (tailscale 1.102): nulls for the address list and the peer map.
+    #[test]
+    fn parses_logged_out_tailscale_status() {
+        let json = r#"{"Version":"1.102.4","TUN":true,"BackendState":"NeedsLogin","AuthURL":"","TailscaleIPs":null,"Self":{"ID":"","HostName":"edex-os","DNSName":"","OS":"linux","TailscaleIPs":null,"Online":false},"Peer":null,"MagicDNSSuffix":"","CurrentTailnet":null}"#;
+        let r = FakeRunner::default().with("tailscale status --json", json);
+        let st = tailscale_query(&r);
+        assert_eq!(st.backend_state, "NeedsLogin");
+        assert_eq!(st.self_name, "edex-os");
+        assert!(st.peers.is_empty());
+    }
 
     #[test]
     fn parses_tailscale_status() {

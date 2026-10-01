@@ -265,7 +265,12 @@ impl App {
             sysmon,
             privacy_probe: PrivacyProbe::new(5),
             system,
-            sys: SysCache::default(),
+            sys: SysCache {
+                // Known before the first (slower) privacy query returns, so the panel never
+                // claims Tor or Tailscale are missing while it is still loading.
+                privacy: system::privacy::PrivacyState::installed_only(),
+                ..SysCache::default()
+            },
             apps,
             search: AppSearch::new(),
             launch_history,
