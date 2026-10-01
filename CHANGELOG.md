@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.0.0 — unreleased
+
+**eDEX-DE is now the desktop of RustOS.** The Linux distribution builds (AUR, .deb, .rpm, systemd
+units, greetd, Hyprland config) are gone; RustOS builds eDEX-DE from its ports tree and runs it as
+the `edex` service. It needs RustOS's graphics and desktop milestones; see
+[docs/rustos.md](docs/rustos.md).
+
+* **edex-comp, eDEX's own compositor** (Smithay), replaces Hyprland, hypridle, hyprlock,
+  hyprsunset and greetd. It runs on DRM/KMS with libinput and seatd (or nested for development),
+  tiles apps into the centre panel the shell reports (dwindle or master), keeps workspaces per
+  output, minimizes into tabs, maximizes between the bars, scratchpad, Xwayland, night light through
+  the gamma ramp, idle lock and screen off, lid switch, PNG screenshots, and a JSON control socket
+  with an event stream (`edex-comp msg`, [docs/compositor.md](docs/compositor.md)).
+* **Login and lock** run in edex-comp: `edex-greeter` logs in through the control socket,
+  `edex-auth` checks the password against RustOS's shadow files, and edex-comp starts and
+  supervises the session (session D-Bus, PipeWire, portals, the shell) as the user. The lock
+  screen is `edex-greeter --lock` on ext-session-lock.
+* **Key bindings** live in edex-comp, with the same defaults; add or override them with
+  `[[wm.binds]]` in `config.toml`. Lock moved to `SUPER+Alt+L`.
+* **RustOS backends:** network through the NetworkManager D-Bus API (`rustos-nmd`), Bluetooth
+  through `/dev/bluetooth`, brightness through sysfs, services through `svc`, accounts through
+  `edex-auth` (real name, lock and unlock included), Tor helpers on `svc`. Removed: the firewall
+  toggle and transparent Tor mode (no packet filter yet), OpenVPN import, power profiles and
+  suspend (shown as unavailable).
+* The shell no longer creates reserver surfaces; it sends `set-app-area` to edex-comp instead.
+  The `scrolling` layout is gone.
+
 ## 3.2.0 — 2026-10-01
 
 * **Privacy panel shows the real state.** Tor and Tailscale were reported as not installed until

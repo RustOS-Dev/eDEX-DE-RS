@@ -56,15 +56,14 @@ use smithay_client_toolkit::{
         },
         WaylandSurface,
     },
-    shm::{slot::SlotPool, Shm, ShmHandler},
+    shm::{Shm, ShmHandler},
 };
 use tracing::{debug, info, warn};
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
     protocol::{
         wl_data_device::WlDataDevice, wl_data_device_manager::DndAction,
-        wl_data_source::WlDataSource, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm,
-        wl_surface,
+        wl_data_source::WlDataSource, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface,
     },
     Connection, Proxy, QueueHandle,
 };
@@ -78,7 +77,7 @@ use wayland_protocols::wp::{
 
 pub use events::{button, KeyInput, Modifiers, OutputInfo, PlatformEvent};
 pub use smithay_client_toolkit::seat::pointer::CursorIcon as Cursor;
-pub use surface::{Edge, SurfaceRole};
+pub use surface::SurfaceRole;
 use surface::{SurfaceEntry, SurfaceKind};
 
 /// Identifier of a surface created through the platform.
@@ -170,43 +169,6 @@ impl LayerSpec {
             margin: (y, 0, 0, x),
         }
     }
-
-    pub fn reserver(output: OutputId, edge: Edge, size: u32) -> Self {
-        let (anchor, dims, ns) = match edge {
-            Edge::Top => (
-                Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
-                (0, size),
-                "edex-de:reserve-top",
-            ),
-            Edge::Bottom => (
-                Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                (0, size),
-                "edex-de:reserve-bottom",
-            ),
-            Edge::Left => (
-                Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM,
-                (size, 0),
-                "edex-de:reserve-left",
-            ),
-            Edge::Right => (
-                Anchor::RIGHT | Anchor::TOP | Anchor::BOTTOM,
-                (size, 0),
-                "edex-de:reserve-right",
-            ),
-        };
-        Self {
-            role: SurfaceRole::Reserver(edge),
-            output: Some(output),
-            layer: Layer::Top,
-            anchor,
-            size: dims,
-            exclusive_zone: size as i32,
-            keyboard: KeyboardInteractivity::None,
-            namespace: ns.into(),
-            accepts_input: false,
-            margin: (0, 0, 0, 0),
-        }
-    }
 }
 
 struct SeatEntry {
@@ -232,7 +194,6 @@ pub struct Platform<E: 'static> {
     seat_state: SeatState,
     compositor: CompositorState,
     shm: Shm,
-    pool: SlotPool,
     layer_shell: Option<LayerShell>,
     xdg_shell: Option<XdgShell>,
     viewporter: Option<WpViewporter>,
@@ -273,7 +234,6 @@ impl<E: 'static> Platform<E> {
 
         let compositor = CompositorState::bind(&globals, &qh).context("wl_compositor missing")?;
         let shm = Shm::bind(&globals, &qh).context("wl_shm missing")?;
-        let pool = SlotPool::new(64, &shm).context("failed to create shm pool")?;
         let layer_shell = LayerShell::bind(&globals, &qh).ok();
         let xdg_shell = XdgShell::bind(&globals, &qh).ok();
         let viewporter = bind_optional::<WpViewporter, Self>(&globals, &qh, 1..=1);
@@ -311,7 +271,6 @@ impl<E: 'static> Platform<E> {
             seat_state: SeatState::new(&globals, &qh),
             compositor,
             shm,
-            pool,
             layer_shell,
             xdg_shell,
             viewporter,
@@ -514,7 +473,6 @@ impl<E: 'static> Platform<E> {
                 logical_size: spec.size,
                 configured: false,
                 frame_pending: false,
-                reserver_buffer: None,
             },
         );
         debug!(?id, role = ?spec.role, "layer surface created");
@@ -562,7 +520,6 @@ impl<E: 'static> Platform<E> {
                 logical_size: (1280, 720),
                 configured: false,
                 frame_pending: false,
-                reserver_buffer: None,
             },
         );
         Ok(id)
@@ -601,7 +558,6 @@ impl<E: 'static> Platform<E> {
                     logical_size: (1280, 720),
                     configured: false,
                     frame_pending: false,
-                    reserver_buffer: None,
                 },
             );
             ids.push(id);
@@ -696,7 +652,7 @@ impl<E: 'static> Platform<E> {
             .map(|e| e.buffer_size())
     }
 
-    /// Update the requested size of a layer surface (reservers use this when panels resize).
+    /// Update the requested size of a layer surface.
     pub fn set_layer_size(&mut self, id: SurfaceId, width: u32, height: u32) {
         if let Some(entry) = self.surfaces.get_mut(&id) {
             if let SurfaceKind::Layer(layer) = &entry.kind {
@@ -722,24 +678,6 @@ impl<E: 'static> Platform<E> {
                 layer.set_exclusive_zone(zone);
                 layer.commit();
             }
-        }
-    }
-
-    /// Resize a reserver: both the requested size on its axis and its exclusive zone.
-    pub fn set_reserver_size(&mut self, id: SurfaceId, size: u32) {
-        let Some(entry) = self.surfaces.get_mut(&id) else {
-            return;
-        };
-        let SurfaceRole::Reserver(edge) = entry.role else {
-            return;
-        };
-        if let SurfaceKind::Layer(layer) = &entry.kind {
-            match edge {
-                Edge::Top | Edge::Bottom => layer.set_size(0, size),
-                Edge::Left | Edge::Right => layer.set_size(size, 0),
-            }
-            layer.set_exclusive_zone(size as i32);
-            layer.commit();
         }
     }
 
@@ -827,38 +765,6 @@ impl<E: 'static> Platform<E> {
                 .ok_or_else(|| anyhow!("null wl_surface pointer"))?,
         ));
         Ok((display, window))
-    }
-
-    /// Present a reserver: attach its 1x1 buffer scaled to the configured size.
-    fn present_reserver(&mut self, id: SurfaceId) {
-        let Some(entry) = self.surfaces.get_mut(&id) else {
-            return;
-        };
-        let (w, h) = entry.logical_size;
-        if w == 0 || h == 0 {
-            return;
-        }
-        if entry.reserver_buffer.is_none() {
-            match self.pool.create_buffer(1, 1, 4, wl_shm::Format::Argb8888) {
-                Ok((buffer, canvas)) => {
-                    canvas[..4].copy_from_slice(&[0, 0, 0, 0]);
-                    entry.reserver_buffer = Some(buffer);
-                }
-                Err(e) => {
-                    warn!("failed to create reserver buffer: {e}");
-                    return;
-                }
-            }
-        }
-        let buffer = entry.reserver_buffer.as_ref().expect("buffer just created");
-        if let Some(viewport) = &entry.viewport {
-            viewport.set_destination(w as i32, h as i32);
-        }
-        // The buffer stays attached while the compositor holds it; a failed re-activation
-        // just means the previous attach is still in effect, so only the viewport changes.
-        let _ = buffer.attach_to(&entry.wl_surface);
-        entry.wl_surface.damage_buffer(0, 0, 1, 1);
-        entry.wl_surface.commit();
     }
 
     pub fn set_cursor(&mut self, icon: CursorIcon) {
@@ -1142,10 +1048,8 @@ impl<E: 'static> LayerShellHandler for Platform<E> {
             return;
         };
         let (mut width, mut height) = configure.new_size;
-        let role;
         {
             let entry = self.surfaces.get_mut(&id).expect("surface exists");
-            role = entry.role;
             if width == 0 {
                 width = entry.logical_size.0.max(1);
             }
@@ -1157,10 +1061,6 @@ impl<E: 'static> LayerShellHandler for Platform<E> {
             if let Some(viewport) = &entry.viewport {
                 viewport.set_destination(width as i32, height as i32);
             }
-        }
-        if matches!(role, SurfaceRole::Reserver(_)) {
-            self.present_reserver(id);
-            return;
         }
         let scale = self.scale(id);
         self.events.push_back(PlatformEvent::Configure {
@@ -1673,22 +1573,6 @@ smithay_client_toolkit::delegate_dispatch2!(@<E: 'static> Platform<E>);
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reserver_specs_anchor_correct_edges() {
-        let top = LayerSpec::reserver(OutputId(1), Edge::Top, 40);
-        assert_eq!(top.size, (0, 40));
-        assert!(top
-            .anchor
-            .contains(Anchor::TOP | Anchor::LEFT | Anchor::RIGHT));
-        assert_eq!(top.exclusive_zone, 40);
-        let left = LayerSpec::reserver(OutputId(1), Edge::Left, 300);
-        assert_eq!(left.size, (300, 0));
-        assert!(left
-            .anchor
-            .contains(Anchor::LEFT | Anchor::TOP | Anchor::BOTTOM));
-        assert!(!left.accepts_input);
-    }
 
     #[test]
     fn scale_math_prefers_fractional() {

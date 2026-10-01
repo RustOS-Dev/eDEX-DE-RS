@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE configuration (TOML) and Hyprland export"
+description = "eDEX-DE configuration (TOML), shared by the shell and edex-comp"
 
 [dependencies]
 serde = { workspace = true }

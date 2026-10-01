@@ -10,16 +10,19 @@ Request objects carry `"cmd"` (kebab-case) plus fields:
 | `toggle` / `show` / `hide` | `target`: `launcher`, `settings`, `privacy`, `notifications`, `power` | overlay control |
 | `focus` | `target`: `terminal` or `filesystem` | shell panel focus |
 | `audio` | `op`: `volume` (+`delta` or `set`), `mute`, `mic-mute` | wpctl + OSD |
-| `brightness` | `delta` | brightnessctl + OSD |
+| `brightness` | `delta` | `/sys/class/backlight` + OSD |
 | `theme` | `name` | switch and save the theme |
-| `reload` | | re-read config, regenerate the Hyprland export |
-| `state` | | JSON snapshot (outputs, frames, overlay, terminal, Hyprland, status) |
+| `reload` | | re-read the config here and in edex-comp |
+| `state` | | JSON snapshot (outputs, frames, overlay, terminal, `compositor`, status) |
 | `screenshot-scene` | | rect count and visible strings of the primary canvas (for tests) |
 | `notify` | `summary`, `body` | local notification |
 | `action` | `name`: `install`, `lock`, `new-tab`, `keyboard` | shell actions |
-| `quit` | | exit the shell (the user service restarts it) |
+| `quit` | | exit the shell (edex-comp restarts it) |
 
 Replies: `{"ok":true}`, `{"ok":true,"data":…}` or `{"ok":false,"error":"…"}`.
 
 The `edex-de ipc` CLI turns arguments into requests: `edex-de ipc audio volume +5`,
 `edex-de ipc toggle launcher`, `edex-de ipc state`.
+
+edex-comp's own control socket (windows, workspaces, session) is described in
+[compositor.md](compositor.md).

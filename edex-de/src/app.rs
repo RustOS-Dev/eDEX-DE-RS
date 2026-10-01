@@ -773,7 +773,7 @@ impl App {
                 self.state.terminal.active = self.terminal.active_index();
                 Some(render_strip(&self.state, wf, hf))
             }
-            SurfaceRole::Reserver(_) | SurfaceRole::Window | SurfaceRole::Lock => None,
+            SurfaceRole::Window | SurfaceRole::Lock => None,
         };
         let Some(rendered) = rendered else {
             self.dirty.remove(&id);
@@ -1157,12 +1157,7 @@ impl App {
                 if platform.surface_role(surface) == Some(SurfaceRole::Canvas) {
                     self.relayout(platform);
                 }
-                if !matches!(
-                    platform.surface_role(surface),
-                    Some(SurfaceRole::Reserver(_))
-                ) {
-                    self.dirty.insert(surface);
-                }
+                self.dirty.insert(surface);
             }
             PlatformEvent::ScaleChanged { surface, scale } => {
                 if let Some(r) = self.renderers.get_mut(&surface) {

@@ -135,8 +135,8 @@ impl PanelLayout {
         }
     }
 
-    /// Exclusive zones (top, bottom, left, right) the reservers should claim. The top zone
-    /// includes the tab strip so application windows never cover it.
+    /// Margins (top, bottom, left, right) around the app area edex-comp tiles windows into. The
+    /// top margin includes the tab strip so application windows never cover it.
     pub fn reserved_zones(&self) -> (u32, u32, u32, u32) {
         (
             self.tab_strip.bottom().round() as u32,

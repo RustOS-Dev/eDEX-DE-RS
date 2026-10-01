@@ -127,7 +127,7 @@ pub struct Wm {
     pub gaps_in: u32,
     pub gaps_out: u32,
     pub border: u32,
-    /// dwindle | master | scrolling
+    /// dwindle | master
     pub layout: String,
     pub workspaces: u32,
     pub animations: bool,
@@ -311,7 +311,7 @@ impl Config {
         self.wm.gaps_in = self.wm.gaps_in.min(64);
         self.wm.gaps_out = self.wm.gaps_out.min(128);
         self.wm.border = self.wm.border.min(10);
-        if !["dwindle", "master", "scrolling"].contains(&self.wm.layout.as_str()) {
+        if !["dwindle", "master"].contains(&self.wm.layout.as_str()) {
             self.wm.layout = "dwindle".into();
         }
         self.input.repeat_rate = self.input.repeat_rate.clamp(1, 200);

@@ -1,9 +1,8 @@
-//! Surface bookkeeping shared by canvases, reservers, overlays, toasts and xdg windows.
+//! Surface bookkeeping shared by canvases, overlays, toasts and xdg windows.
 
 use smithay_client_toolkit::{
     session_lock::SessionLockSurface,
     shell::{wlr_layer::LayerSurface, xdg::window::Window},
-    shm::slot::Buffer,
 };
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_protocols::wp::{
@@ -13,28 +12,17 @@ use wayland_protocols::wp::{
 
 use crate::OutputId;
 
-/// Which edge a reserver surface occupies.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Edge {
-    Top,
-    Bottom,
-    Left,
-    Right,
-}
-
 /// The role a surface plays in the shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceRole {
     /// Full-output background canvas drawn with wgpu.
     Canvas,
-    /// Invisible layer surface that only reserves an exclusive zone.
-    Reserver(Edge),
     /// Full-output overlay drawn with wgpu (launcher, settings, ...).
     Overlay,
     /// Small overlay-layer surface for toasts and OSDs.
     Toast,
-    /// Top-layer bar over the centre panel's tab strip. Hyprland stops sending pointer input to
-    /// background layers while a window is maximized, so the window controls live up here.
+    /// Top-layer bar over the centre panel's tab strip, above maximized windows, so the tabs and
+    /// window controls stay usable.
     Strip,
     /// xdg-toplevel window (the greeter on the login screen).
     Window,
@@ -64,8 +52,6 @@ pub(crate) struct SurfaceEntry {
     pub logical_size: (u32, u32),
     pub configured: bool,
     pub frame_pending: bool,
-    /// The 1x1 buffer used by reservers.
-    pub reserver_buffer: Option<Buffer>,
 }
 
 impl SurfaceEntry {

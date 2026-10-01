@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE — sci-fi desktop shell for Hyprland"
+description = "eDEX-DE — the sci-fi desktop of RustOS"
 default-run = "edex-de"
 
 [[bin]]

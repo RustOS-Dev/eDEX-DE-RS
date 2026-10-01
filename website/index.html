@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eDEX-DE — Sci-Fi Wayland Desktop Environment</title>
+    <title>eDEX-DE — The RustOS Desktop</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,10 +13,10 @@
         <div class="logo">
             <span class="logo-edex">eDEX</span><span class="logo-de">-DE</span>
         </div>
-        <p class="tagline">A sci-fi desktop shell for Hyprland — Rust + wgpu</p>
+        <p class="tagline">The sci-fi desktop of RustOS — Rust, Smithay + wgpu</p>
         <div class="header-links">
-            <a href="https://github.com/eDEX-OS/eDEX-DE" class="btn btn-primary">GitHub</a>
-            <a href="https://github.com/eDEX-OS/eDEX-DE/releases/latest" class="btn btn-secondary">Latest Release</a>
+            <a href="https://github.com/RustOS-Dev/eDEX-DE-RS" class="btn btn-primary">GitHub</a>
+            <a href="https://github.com/RustOS-Dev/RustOS" class="btn btn-secondary">RustOS</a>
         </div>
     </header>
 
@@ -27,8 +27,8 @@
             <div class="feature-grid">
                 <div class="feature-card">
                     <span class="feature-icon">🖥️</span>
-                    <h3>Full Wayland Compositor</h3>
-                    <p>Runs on Hyprland 0.55+: the shell draws on the layer shell and reserves space so your apps tile exactly into the terminal slot.</p>
+                    <h3>Its Own Wayland Compositor</h3>
+                    <p>edex-comp (Smithay) runs on DRM/KMS with libinput and seatd, starts your session, locks it and runs X11 apps through Xwayland.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">🎨</span>
@@ -53,12 +53,12 @@
                 <div class="feature-card">
                     <span class="feature-icon">🪟</span>
                     <h3>Tiling Window Manager</h3>
-                    <p>Hyprland tiles your windows inside the eDEX frame; panels, bars and keyboard stay visible around them.</p>
+                    <p>Apps tile into the centre panel next to your terminal tabs; minimize, maximize and close them from the tab strip.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">⚙️</span>
                     <h3>Settings Panel</h3>
-                    <p>14-category settings wired to real backends, a privacy panel for Tor, Tailscale and VPNs, a notification server and a greetd greeter.</p>
+                    <p>14-category settings wired to real backends, a privacy panel for Tor, Tailscale and VPNs, a notification server and the eDEX login screen.</p>
                 </div>
                 <div class="feature-card">
                     <span class="feature-icon">🔒</span>
@@ -73,26 +73,16 @@
             <h2 class="section-title">// INSTALLATION</h2>
             <div class="install-grid">
                 <div class="install-card">
-                    <h3>Arch Linux (AUR)</h3>
-                    <pre><code>yay -S edex-de</code></pre>
-                    <p>Then log out and select <strong>eDEX-DE</strong> from your display manager.</p>
+                    <h3>RustOS</h3>
+                    <pre><code>tools/install-port.sh edex-de
+svc enable edex
+svc start edex</code></pre>
+                    <p>The <strong>edex</strong> service shows the eDEX login screen on tty1.</p>
                 </div>
                 <div class="install-card">
-                    <h3>Debian / Ubuntu</h3>
-                    <pre><code>sudo dpkg -i edex-de-*-amd64.deb</code></pre>
-                    <a href="https://github.com/eDEX-OS/eDEX-DE/releases/latest" class="btn btn-secondary small">Download .deb</a>
-                </div>
-                <div class="install-card">
-                    <h3>Fedora / RHEL</h3>
-                    <pre><code>sudo rpm -i edex-de-*.x86_64.rpm</code></pre>
-                    <a href="https://github.com/eDEX-OS/eDEX-DE/releases/latest" class="btn btn-secondary small">Download .rpm</a>
-                </div>
-                <div class="install-card">
-                    <h3>From Source</h3>
-                    <pre><code>cargo build --release --locked --workspace --bins
-sudo install -Dm755 \
-  target/release/edex-de \
-  /usr/bin/edex-de</code></pre>
+                    <h3>Develop</h3>
+                    <pre><code>cargo run -p edex-comp -- --nested</code></pre>
+                    <p>Runs the compositor and the shell in a window of your current session.</p>
                 </div>
             </div>
         </section>
@@ -111,9 +101,9 @@ sudo install -Dm755 \
                     <tr><td><kbd>Super+N</kbd></td><td>Notifications</td></tr>
                     <tr><td><kbd>Super+Esc</kbd></td><td>Power menu</td></tr>
                     <tr><td><kbd>Super+Return</kbd></td><td>Focus the eDEX terminal</td></tr>
-                    <tr><td><kbd>Super+Q</kbd> / <kbd>Super+F</kbd></td><td>Close / fullscreen window</td></tr>
+                    <tr><td><kbd>Super+Q</kbd> / <kbd>Super+M</kbd> / <kbd>Super+F</kbd></td><td>Close / minimize / maximize window</td></tr>
                     <tr><td><kbd>Super+1–0</kbd></td><td>Switch workspace</td></tr>
-                    <tr><td><kbd>Super+L</kbd></td><td>Lock screen (hyprlock)</td></tr>
+                    <tr><td><kbd>Super+Alt+L</kbd></td><td>Lock screen</td></tr>
                 </tbody>
             </table>
         </section>
@@ -122,19 +112,20 @@ sudo install -Dm755 \
         <section id="stack">
             <h2 class="section-title">// TECH STACK</h2>
             <div class="stack-list">
-                <div class="stack-item"><span class="stack-name">Hyprland</span><span class="stack-desc">Window management; eDEX-DE draws on its layer shell (smithay-client-toolkit)</span></div>
+                <div class="stack-item"><span class="stack-name">RustOS</span><span class="stack-desc">The operating system: a Rust kernel with a Linux-compatible ABI</span></div>
+                <div class="stack-item"><span class="stack-name">Smithay</span><span class="stack-desc">edex-comp, the compositor; the shell draws on its layer shell (smithay-client-toolkit)</span></div>
                 <div class="stack-item"><span class="stack-name">wgpu</span><span class="stack-desc">GPU-accelerated rendering via Vulkan + WGSL shaders</span></div>
                 <div class="stack-item"><span class="stack-name">glyphon</span><span class="stack-desc">wgpu text rendering with cosmic-text layout</span></div>
                 <div class="stack-item"><span class="stack-name">alacritty_terminal</span><span class="stack-desc">Terminal emulation and PTY handling</span></div>
                 <div class="stack-item"><span class="stack-name">sysinfo</span><span class="stack-desc">Cross-platform system statistics</span></div>
-                <div class="stack-item"><span class="stack-name">zbus</span><span class="stack-desc">Notification server, logind, UPower and fprintd</span></div>
-                <div class="stack-item"><span class="stack-name">greetd + cage</span><span class="stack-desc">The eDEX login screen</span></div>
+                <div class="stack-item"><span class="stack-name">zbus</span><span class="stack-desc">Notification server, NetworkManager API, UPower and login1</span></div>
+                <div class="stack-item"><span class="stack-name">edex-greeter + edex-auth</span><span class="stack-desc">The eDEX login and lock screens</span></div>
             </div>
         </section>
     </main>
 
     <footer>
-        <p>eDEX-DE is <a href="https://github.com/eDEX-OS/eDEX-DE/blob/master/LICENSE">GPL-3.0</a> licensed.</p>
+        <p>eDEX-DE is <a href="https://github.com/RustOS-Dev/eDEX-DE-RS/blob/master/LICENSE">GPL-3.0</a> licensed.</p>
         <p>Inspired by <a href="https://github.com/GitSquared/edex-ui">eDEX-UI</a> by GitSquared.</p>
     </footer>
 </body>

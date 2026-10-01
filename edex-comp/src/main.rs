@@ -3,31 +3,37 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use comp_proto::{Rect, Request};
 use edex_comp::state::InitOptions;
 
 #[derive(Parser)]
 #[command(name = "edex-comp", version, about = "The eDEX compositor for RustOS")]
+#[command(args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    #[command(flatten)]
+    run: RunArgs,
+}
+
+#[derive(Args, Default)]
+struct RunArgs {
+    /// Run inside another Wayland or X11 session (development).
+    #[arg(long)]
+    nested: bool,
+    /// Show the login screen; started as root by the RustOS service manager on tty1.
+    #[arg(long)]
+    greeter: bool,
+    /// Start these programs instead of the eDEX session (repeatable).
+    #[arg(long = "run", value_name = "COMMAND")]
+    run: Vec<String>,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the compositor (the default).
-    Run {
-        /// Run inside another Wayland or X11 session (development).
-        #[arg(long)]
-        nested: bool,
-        /// Show the login screen; started as root by the RustOS service manager on tty1.
-        #[arg(long)]
-        greeter: bool,
-        /// Start these programs instead of the eDEX session (repeatable).
-        #[arg(long = "run", value_name = "COMMAND")]
-        run: Vec<String>,
-    },
+    /// Run the compositor (the default; `edex-comp --greeter` is `edex-comp run --greeter`).
+    Run(RunArgs),
     /// Send a raw JSON request, e.g. `edex-comp msg '{"cmd":"state"}'`.
     Msg { json: String },
     /// Print windows, workspaces and outputs.
@@ -44,16 +50,8 @@ enum Command {
 
 fn main() {
     let cli = Cli::parse();
-    let result = match cli.command.unwrap_or(Command::Run {
-        nested: false,
-        greeter: false,
-        run: Vec::new(),
-    }) {
-        Command::Run {
-            nested,
-            greeter,
-            run,
-        } => run_compositor(nested, greeter, run),
+    let result = match cli.command.unwrap_or(Command::Run(cli.run)) {
+        Command::Run(a) => run_compositor(a.nested, a.greeter, a.run),
         Command::Msg { json } => msg(&json),
         Command::State => state(),
         Command::Screenshot {

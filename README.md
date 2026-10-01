@@ -1,89 +1,89 @@
 # eDEX-DE
 
-[![CI](https://github.com/eDEX-OS/eDEX-DE/actions/workflows/ci.yml/badge.svg)](https://github.com/eDEX-OS/eDEX-DE/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/eDEX-OS/eDEX-DE?include_prereleases)](https://github.com/eDEX-OS/eDEX-DE/releases/latest)
+[![CI](https://github.com/RustOS-Dev/eDEX-DE-RS/actions/workflows/ci.yml/badge.svg)](https://github.com/RustOS-Dev/eDEX-DE-RS/actions/workflows/ci.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-cyan.svg)](LICENSE)
 
-**eDEX-DE** is a sci-fi desktop shell for [Hyprland](https://hyprland.org), written in Rust and drawn with
-wgpu, in the style of [eDEX-UI](https://github.com/GitSquared/edex-ui). Hyprland tiles your applications;
-eDEX-DE draws everything around them: the terminal, file browser, system dashboard, on-screen keyboard,
-status bars, launcher, settings, privacy panel, notifications, power menu and the login screen.
+**eDEX-DE** is the desktop of [RustOS](https://github.com/RustOS-Dev/RustOS): a sci-fi shell in the
+style of [eDEX-UI](https://github.com/GitSquared/edex-ui), written in Rust, drawn with wgpu, with its
+own Wayland compositor. It draws everything around your applications (the terminal, file browser,
+system dashboard, launcher, settings, privacy panel, notifications, power menu, login and lock
+screens), and the compositor, **edex-comp**, tiles applications into the shell's centre panel next
+to its terminal tabs.
 
-It is the desktop of [eDEX-OS](https://github.com/eDEX-OS/eDEX-OS) and installs on any Arch-based system
-with Hyprland 0.55 or newer.
+eDEX-DE targets RustOS once its desktop milestones are in place: DRM/KMS and Mesa (M35, M38–M41),
+the desktop kernel features (M36), the Wayland stack (M37) and the desktop services of M42
+(seatd, D-Bus, PipeWire, UPower, `rustos-nmd`). [docs/rustos.md](docs/rustos.md) lists exactly
+what it needs from RustOS.
 
 ## What you get
 
 | Part | Implementation |
 |---|---|
-| Layout | Layer-shell canvas per output plus four invisible reserver surfaces, so Hyprland tiles app windows exactly into the terminal slot while the panels stay visible |
-| Terminal | Multi-tab terminal on `alacritty_terminal` (alt screen, scroll regions, mouse reporting, bracketed paste, OSC 52, selection, scrollback) |
+| Compositor | `edex-comp`, built on Smithay: DRM/KMS with GBM/EGL (Mesa, including `kms_swrast` on efidrm), libinput, libseat, Xwayland. Tiles windows into the shell's centre panel, with workspaces per output, maximize, fullscreen, floating, minimize-to-tab and a scratchpad |
+| Terminal | Multi-tab terminal on `alacritty_terminal` (alt screen, scroll regions, mouse reporting, bracketed paste, OSC 52, selection, scrollback), running RustOS's `sh` |
 | Files | Clickable file browser with breadcrumbs, dotfiles toggle, open-in-terminal, `xdg-open` |
-| Dashboard | CPU per core, memory, network sparklines, disks, processes; privacy indicators for Tor, Tailscale, VPN, WireGuard, fprintd, microphone and camera |
-| Keyboard | Optional on-screen hex keyboard for touchscreens (Settings → Appearance, or `Ctrl+Shift+K`); off by default |
+| Dashboard | CPU per core, memory, network sparklines, disks, processes; privacy indicators for Tor, VPN, WireGuard, microphone and camera |
+| Keyboard | Optional on-screen hex keyboard for touchscreens (Settings → Appearance, or `Ctrl+Shift+K`) |
 | Launcher | Fuzzy search over XDG desktop entries with launch history (tap `SUPER`, or `SUPER+Space`) |
-| Settings | 14 categories wired to real backends: appearance, display, input, audio (wpctl), network (nmcli), bluetooth (bluetoothctl), power (upower/logind/power-profiles), security (hyprlock, fprintd), users, notifications, services (systemd), window manager, terminal, about |
-| Privacy | Tor modes (off / socks5 / transparent), bootstrap and circuit state, NEWNYM, bridges; Tailscale login, exit nodes, peers; NetworkManager VPNs; DNS and firewall status |
+| Settings | Appearance, display, input, audio (PipeWire/wpctl), network (NetworkManager D-Bus, served by `rustos-nmd`), Bluetooth (`/dev/bluetooth`), power (UPower, login1), users (`edex-auth`), notifications, services (RustOS `svc` and the session programs), window manager, terminal, about |
+| Privacy | Tor (SOCKS mode, bootstrap and circuit state, NEWNYM, obfs4/snowflake bridges), WireGuard tunnels, Tailscale when installed, DNS check |
 | Notifications | eDEX-DE is the `org.freedesktop.Notifications` server: toasts, actions, history, do-not-disturb, per-app mute |
-| Power / OSD | Lock, log out, suspend, hibernate, reboot, power off via logind; volume and brightness OSD |
-| Greeter | `edex-greeter` for greetd (runs under `cage`), with fingerprint-aware PAM conversation, session picker and power buttons |
-| Config | `~/.config/edex-de/config.toml` with live reload; Hyprland settings are exported to `~/.config/edex-de/hypr/generated.lua` |
+| Login and lock | `edex-comp --greeter` runs `edex-greeter`; passwords are checked by `edex-auth` against RustOS's shadow file. The same greeter is the ext-session-lock lock screen |
+| Config | `~/.config/edex-de/config.toml`, read by the shell and edex-comp and reloaded live |
 | Themes | Tron, Matrix, Amber, Cyborg, Blade, Apollo, Interstellar, Horizon, Navy, Nord, Red, Purple; add your own in `~/.config/edex-de/themes` |
-| IPC | `edex-de ipc …` drives the shell from Hyprland binds and scripts |
+| IPC | `edex-de ipc …` drives the shell; `edex-comp msg|state|screenshot` drives the compositor |
 
-## Install
+## Install on RustOS
 
-### Arch Linux / CachyOS
+RustOS builds eDEX-DE from source in its ports tree:
 
 ```bash
-yay -S edex-de            # AUR
-# or from a checkout:
-scripts/build-pkg.sh && sudo pacman -U packaging/aur/edex-de-*.pkg.tar.zst
+# in a RustOS checkout
+tools/install-port.sh --initramfs edex-de     # or: add edex-de to ports/default.list
+cargo build && ./write_to_drive.sh --drive /dev/sdX
 ```
 
-Then either pick **eDEX-DE** in your display manager, or use the eDEX greeter:
+On the running system, turn the desktop on (it runs on tty1 and starts at every boot):
 
-```bash
-sudo cp /usr/share/edex-de/greetd/config.toml /etc/greetd/config.toml
-sudo systemctl enable --now greetd.service
+```sh
+svc enable edex && svc start edex
 ```
 
-### Debian / Ubuntu and Fedora
+The service runs `edex-comp --greeter` as root on tty1. After you log in, edex-comp starts your
+session as you: the session D-Bus, PipeWire and WirePlumber, the portals and the shell, and restarts
+any of them that crash.
 
-`.deb` and `.rpm` packages are attached to every release. They are built and installed in CI but not
-integration-tested on those distributions; Hyprland 0.55+ with Lua configuration must come from your
-distribution or from source.
+## Develop
 
-### From source
-
-```bash
-sudo pacman -S --needed rust hyprland cage greetd libxkbcommon wayland vulkan-icd-loader \
-    pipewire wireplumber networkmanager bluez-utils upower brightnessctl hyprlock hypridle \
-    hyprpolkitagent hyprsunset xdg-desktop-portal-hyprland xdg-desktop-portal-gtk ttf-jetbrains-mono-nerd \
-    kitty wl-clipboard cliphist grim slurp playerctl librsvg
-cargo build --release --locked --workspace --bins
-```
-
-For development, run the shell inside a nested Hyprland (or any wlr-layer-shell compositor):
+eDEX-DE builds and tests on any Linux host. The RustOS target is `x86_64-unknown-linux-musl`,
+linked dynamically against the RustOS ports ([.cargo/config.toml](.cargo/config.toml)).
 
 ```bash
-EDEX_SHARE_DIR=$PWD/share cargo run -p edex-de -- run            # on Hyprland
-EDEX_SHARE_DIR=$PWD/share cargo run -p edex-de -- run --no-hypr  # on sway etc.
-cargo run -p edex-greeter -- --demo                              # greeter without greetd
+sudo apt install libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev \
+    libgbm-dev libdrm-dev libinput-dev libseat-dev libudev-dev libpixman-1-dev pkg-config
+cargo build --workspace
+cargo test --workspace
+
+# Nested inside another Wayland or X11 session:
+EDEX_SHARE_DIR=$PWD/share cargo run -p edex-comp -- run --nested
+# …with only a terminal instead of the full session:
+cargo run -p edex-comp -- run --nested --run foot
+# The greeter without a compositor:
+cargo run -p edex-greeter -- --demo
 ```
 
 ## How a session starts
 
 ```
-greetd (tty1) → cage -s -- edex-greeter → edex-session → start-hyprland
-   Hyprland reads ~/.config/hypr/hyprland.lua
-      → require("edex") → /usr/share/edex-de/hypr/edex/*.lua (env, monitors, look, input, rules, binds, autostart)
-      → dofile ~/.config/edex-de/hypr/generated.lua   (written by the settings panel)
-      → dofile ~/.config/hypr/user.lua                (yours)
-   hyprland.start → portals, hyprpolkitagent, hypridle, cliphist, systemctl --user start edex-de.service
+RustOS init → svc → service "edex" on tty1: edex-comp --greeter (root)
+   edex-greeter (a Wayland client of edex-comp) → Login request
+   edex-comp → edex-auth check USER (password on stdin)
+   edex-comp opens /run/user/UID/{wayland-N, edex-comp.sock}, loads ~/.config/edex-de/config.toml,
+   starts Xwayland, then as the user: dbus-daemon --session, pipewire, wireplumber,
+   xdg-desktop-portal(-wlr), cliphist, edex-de run
+Lock: SUPER+ALT+L, idle timeout or lid → edex-greeter --lock (ext-session-lock)
+Log out: the power menu → edex-comp exits → svc starts the greeter again
 ```
-
-`edex-de.service` is a user unit with `Restart=on-failure`, so a shell crash never ends the session.
 
 ## Windows and the centre tab strip
 
@@ -97,11 +97,13 @@ minimized window. The focused window gets three controls at the right end of the
 * **×** closes it.
 
 Clicking a terminal tab (or `+`) while apps cover the terminal minimizes them into tabs and shows
-the terminal. Middle-click a window tab to close it.
+the terminal. Middle-click a window tab to close it. The shell tells edex-comp the size of the
+centre panel whenever its layout changes, so resizing the side panels re-tiles the windows.
 
 ## Keyboard shortcuts
 
-Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/user.lua`):
+edex-comp's bindings. Add or override them in `config.toml` (`[[wm.binds]]`, see below); Settings →
+Window manager lists the active set.
 
 | Keys | Action |
 |---|---|
@@ -111,18 +113,25 @@ Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/us
 | `SUPER+N` | Notification history |
 | `SUPER+Escape` | Power menu |
 | `SUPER+Return` / `SUPER+F1` | Focus the eDEX terminal / file panel |
-| `SUPER+Shift+Return`, `SUPER+E` | kitty, file manager |
-| `SUPER+Q`, `SUPER+V` | Close, float the focused window |
-| `SUPER+M` | Minimize the focused window into a tab in the centre panel |
+| `SUPER+Shift+Return` | foot |
+| `SUPER+Q`, `SUPER+Shift+Q` | Close, kill the focused window |
+| `SUPER+V`, `SUPER+C` | Float, centre the focused window |
+| `SUPER+M` | Minimize the focused window into a tab |
 | `SUPER+F` | Maximize: full width, side panels hidden, top bar and window controls stay |
-| `SUPER+SHIFT+F` | True fullscreen over everything |
-| `SUPER+CTRL+F` | Hide / show the side panels for all apps |
-| `SUPER+H/J/K/L`, `SUPER+Shift+…`, `SUPER+Ctrl+…` | Focus, move, resize |
-| `SUPER+1..0`, `SUPER+Shift+1..0` | Switch / move to workspace |
+| `SUPER+Shift+F` | True fullscreen over everything |
+| `SUPER+Ctrl+F` | Hide / show the side panels for all apps |
+| `SUPER+H/K/L`, arrows | Focus left / up / right / … |
+| `SUPER+Shift+H/J/K/L`, arrows | Swap the focused window with its neighbour |
+| `SUPER+Tab`, `SUPER+Shift+Tab` | Cycle focus |
+| `SUPER+1..0`, `SUPER+Shift+1..0`, `SUPER+Ctrl+1..0` | Switch to / move to / move with the window to a workspace |
+| `SUPER+[`, `SUPER+]`, `SUPER`+wheel | Previous / next workspace |
 | `SUPER+S` | Scratchpad |
-| `SUPER+L` | Lock (hyprlock) |
-| `Print`, `SUPER+Shift+S` | Screenshot (grim + slurp) |
-| Media keys | Volume, brightness and playback through `edex-de ipc` / playerctl |
+| `SUPER`+drag, `SUPER`+right-drag | Move, resize a window (it floats) |
+| `SUPER+Alt+L` | Lock |
+| `SUPER+Shift+R` | Reload the configuration |
+| `Print`, `SUPER+Shift+S` | Screenshot of the output (to `~/Pictures/Screenshots`), of a region (clipboard) |
+| `Ctrl+Alt+F1..F12` | Virtual terminals |
+| Media keys | Volume, brightness and playback (also on the lock screen) |
 
 Inside the shell:
 
@@ -138,8 +147,8 @@ Inside the shell:
 
 ## Configuration
 
-`~/.config/edex-de/config.toml` is created on first start and reloaded live when edited. Every key is
-optional:
+`~/.config/edex-de/config.toml` is created on first start. The shell and edex-comp both watch it and
+apply changes immediately. Every key is optional:
 
 ```toml
 [appearance]
@@ -167,7 +176,7 @@ bell = "visual"           # visual | audible | none
 osc52_read = false
 
 [launcher]
-terminal_command = "kitty -e"
+terminal_command = "foot"
 
 [notifications]
 dnd = false
@@ -175,15 +184,19 @@ timeout_ms = 5000
 max_visible = 4
 muted_apps = []
 
-[wm]                      # exported to ~/.config/edex-de/hypr/generated.lua
+[wm]                      # edex-comp
 gaps_in = 4
 gaps_out = 8
-border = 2
-layout = "dwindle"        # dwindle | master | scrolling
+border = 2                # focus border in the theme's accent colour
+layout = "dwindle"        # dwindle | master
 workspaces = 9
-animations = true
-blur = false
-rounding = 0
+
+[[wm.binds]]              # added to (or replacing) the built-in bindings
+keys = "SUPER+SHIFT+Return"
+action = "exec kitty"     # exec CMD | shell IPC-ARGS | close | kill | minimize | maximize |
+                          # fullscreen | float | center | focus DIR | move DIR | cycle next|prev |
+                          # workspace N|next|prev|empty|scratch | movetoworkspace N [follow] |
+                          # scratch | lock | exit | reload | screenshot output|region | vt N | none
 
 [input]
 kb_layout = "us"
@@ -196,85 +209,43 @@ tap_to_click = true
 sensitivity = 0.0
 
 [display]
-night_light = false
+night_light = false       # CRTC gamma
 night_temp = 4000
 [[display.monitors]]
-name = ""                 # empty = every output
-mode = "preferred"
-position = "auto"
+name = ""                 # empty = every output without a rule of its own
+mode = "preferred"        # or 2560x1440@144
+position = "auto"         # or 1920x0
 scale = 1.0
+transform = 0             # 0..3 rotations, 4..7 flipped
+disabled = false
 
-[power]                   # exported to hypridle.conf
-dim_after = 300
-lock_after = 600
+[power]                   # edex-comp's idle handling
+lock_after = 600          # seconds, 0 = never
 dpms_after = 900
-suspend_after = 0
-profile = "balanced"
-lid_close = "suspend"
+lid_close = "suspend"     # suspend (panel off, lock) | lock | poweroff | ignore
 lock_on_sleep = true
 
 [privacy]
 tor_mode_on_login = false
-tailscale_exit_node = ""
-fingerprint_login = true
 ```
 
-The settings panel edits this file; `edex-de ipc reload` re-reads it and regenerates the Hyprland side.
+## Layout of the repository
 
-## IPC
+| Path | What |
+|---|---|
+| `edex-comp/` | The compositor (Smithay; started from Smithay's anvil, MIT, licence kept) |
+| `comp-proto/` | edex-comp's control protocol; `comp/` is the shell's client and state model |
+| `edex-de/` | The shell application |
+| `edex-greeter/` | Login and lock screen |
+| `edex-auth/` | Password checks and account edits (no PAM on RustOS) |
+| `platform/`, `renderer/`, `ui/`, `terminal/` | Wayland client, wgpu renderer, scene/layout, terminal |
+| `system/`, `sysmon/`, `notifications/`, `launcher/`, `settings/`, `ipc/` | Backends, monitoring, notification server, launcher, config, shell IPC |
+| `share/libexec/` | Helpers installed to `/usr/libexec/edex-de` (Tor mode and bridges) |
+| `themes/`, `assets/`, `packaging/` | Themes, artwork, greeter config and desktop entries |
 
-```bash
-edex-de ipc toggle launcher|settings|privacy|notifications|power
-edex-de ipc focus terminal|filesystem
-edex-de ipc audio volume +5 | volume 40 | mute | mic-mute
-edex-de ipc brightness -10
-edex-de ipc theme matrix
-edex-de ipc notify "Summary" "Body"
-edex-de ipc state            # JSON: outputs, frames, overlay, terminal, hyprland, status
-edex-de ipc reload | quit
-```
-
-See [docs/ipc.md](docs/ipc.md) for the wire format.
-
-## Privacy panel semantics
-
-* **Tor off** — nothing is routed through Tor.
-* **socks5** — tor runs; applications configured for `127.0.0.1:9050` use it.
-* **transparent** — on eDEX-OS, `edex-tor-mode transparent` redirects all TCP and DNS through Tor with a
-  fail-closed nftables policy (LAN and Tailscale excepted). The panel asks for confirmation first.
-* Tailscale actions call the `tailscale` CLI; eDEX-OS grants your user operator rights so no password is needed.
-* Indicators come from `/run/edex-tor-mode`, listening sockets, interface state and `/proc/*/fd` scans
-  (microphone and camera use).
-
-## Themes
-
-Themes are TOML files (see `themes/tron.toml` for the full schema). Switch live with
-`edex-de ipc theme <name>` or from Settings → Appearance.
-
-## Testing
-
-* `cargo test --workspace` — unit tests including a real PTY, a private D-Bus notification round-trip,
-  layout snapshots and parsers for every CLI backend.
-* `scripts/smoke-sway.sh` — headless sway + llvmpipe: renders the shell, sends a notification, tiles a
-  real window into the terminal slot, opens every overlay and stores screenshots under `target/smoke/`.
-* `scripts/smoke-greeter.sh` — renders the greeter in demo mode.
-* `scripts/build-pkg.sh` — builds the Arch package from the checkout (CI runs it in an Arch container).
-
-See [docs/testing.md](docs/testing.md).
-
-## Troubleshooting
-
-* **Nothing but Hyprland's default look after login** — the shell is a user service: check
-  `systemctl --user status edex-de` and `journalctl --user -u edex-de`. The session log is in
-  `~/.local/state/edex-de/session.log`.
-* **GPU errors** — eDEX-DE uses Vulkan and falls back to GL. `edex-de ipc state` shows the adapter; on VMs
-  install `vulkan-swrast` (llvmpipe).
-* **Hyprland config errors** — `~/.config/hypr/hyprland.lua` must `require` the system file; run
-  `Hyprland --verify-config` after editing `user.lua`.
-* **Another notification daemon** — if dunst or mako own `org.freedesktop.Notifications`, toasts are
-  disabled; remove the other daemon.
-* **Greeter** — `journalctl -u greetd`; run `edex-greeter --demo` inside a session to test the UI.
+See [docs/architecture.md](docs/architecture.md), [docs/compositor.md](docs/compositor.md),
+[docs/ipc.md](docs/ipc.md), [docs/rustos.md](docs/rustos.md) and [docs/testing.md](docs/testing.md).
 
 ## License
 
-GPL-3.0. Inspired by eDEX-UI by GitSquared.
+GPL-3.0. `edex-comp` contains code from Smithay's anvil (MIT); see `edex-comp/LICENSE-anvil.txt`.

@@ -1010,24 +1010,30 @@ fn services(app: &App) -> Form {
         })
         .collect();
     Form::default().section(
-        "systemd",
+        "Services",
         vec![
             choice(
                 id::SCOPE,
                 "Scope",
-                &["system", "user"],
+                &["system (svc)", "session"],
                 if s.services_user { 1 } else { 0 },
             ),
             text(id::FILTER, "Filter", &s.service_filter, "type to filter"),
-            list(id::UNITS, "Units", items, Some("START/STOP"), "no units"),
-            button(id::ENABLE, "Selected unit", "ENABLE"),
-            button(id::DISABLE, "Selected unit", "DISABLE"),
-            button(id::RESTART, "Selected unit", "RESTART"),
+            list(
+                id::UNITS,
+                "Services",
+                items,
+                Some("START/STOP"),
+                "no services",
+            ),
+            button(id::ENABLE, "Selected service", "ENABLE"),
+            button(id::DISABLE, "Selected service", "DISABLE"),
+            button(id::RESTART, "Selected service", "RESTART"),
         ],
     )
 }
 
-const LAYOUTS: [&str; 3] = ["dwindle", "master", "scrolling"];
+const LAYOUTS: [&str; 2] = ["dwindle", "master"];
 
 fn wm(app: &App) -> Form {
     let c = &app.config.wm;
@@ -1485,7 +1491,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             }
             id::LAYOUT => {
                 if let Some(i) = f_idx(&ch) {
-                    c.wm.layout = LAYOUTS[i.min(2)].into();
+                    c.wm.layout = LAYOUTS[i.min(LAYOUTS.len() - 1)].into();
                     save = true;
                     comp_settings = true;
                 }
