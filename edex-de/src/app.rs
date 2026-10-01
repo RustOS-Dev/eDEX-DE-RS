@@ -113,6 +113,8 @@ pub struct App {
     /// Last drawn cursor visibility and pulse level: animation ticks redraw only on change.
     last_cursor_visible: bool,
     last_pulse: f32,
+    /// (theme, font, size) last exported to Qt/GTK, so unrelated config changes do not rewrite it.
+    toolkit_key: Option<(String, String, u32)>,
     pub started: Instant,
     pub quit: bool,
     pub frames: u64,
@@ -281,6 +283,7 @@ impl App {
             last_cursor_visible: true,
             focus_grab: None,
             last_pulse: -1.0,
+            toolkit_key: None,
             started: Instant::now(),
             quit: false,
             frames: 0,
@@ -767,6 +770,27 @@ impl App {
             .unwrap_or_else(builtin_tron);
         self.state.theme = theme;
         self.state.theme.glow = c.appearance.border_glow;
+        if c.appearance.theme_apps && self.opts.smoke.is_none() {
+            let font = if c.appearance.font.is_empty() {
+                "JetBrainsMono Nerd Font".to_string()
+            } else {
+                c.appearance.font.clone()
+            };
+            let pt = ((c.appearance.font_size * 0.75).round() as u32).clamp(8, 16);
+            let key = (self.state.theme.name.clone(), font.clone(), pt);
+            if self.toolkit_key.as_ref() != Some(&key) {
+                let dir = std::env::var_os("XDG_CONFIG_HOME")
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(".config"))
+                    });
+                if let Some(dir) = dir {
+                    crate::toolkits::apply(&dir, &self.state.theme, &font, pt);
+                }
+                self.toolkit_key = Some(key);
+            }
+        }
         let font = if c.appearance.font.is_empty() {
             None
         } else {

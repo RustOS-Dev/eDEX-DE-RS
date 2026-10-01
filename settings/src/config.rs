@@ -14,6 +14,8 @@ pub struct Appearance {
     pub animations: bool,
     pub keyboard_visible: bool,
     pub boot_animation: bool,
+    /// Apply the theme to Qt and GTK applications (qt6ct, GTK settings and colours).
+    pub theme_apps: bool,
 }
 
 impl Default for Appearance {
@@ -28,6 +30,7 @@ impl Default for Appearance {
             // The hex keyboard is for touchscreens; off unless the user turns it on.
             keyboard_visible: false,
             boot_animation: true,
+            theme_apps: true,
         }
     }
 }

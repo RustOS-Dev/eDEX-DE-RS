@@ -8,6 +8,7 @@ mod input;
 mod ipc_handler;
 mod overlays;
 mod status;
+mod toolkits;
 
 use std::{path::PathBuf, time::Duration};
 

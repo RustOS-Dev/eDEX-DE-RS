@@ -598,6 +598,7 @@ dependencies = [
  "settings",
  "sysmon",
  "system",
+ "tempfile",
  "terminal",
  "tracing",
  "tracing-subscriber",

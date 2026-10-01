@@ -49,6 +49,7 @@ mod id {
     pub const ANIMATIONS: u32 = 6;
     pub const KEYBOARD: u32 = 7;
     pub const BOOT: u32 = 8;
+    pub const THEME_APPS: u32 = 1301;
     pub const SIDE_PANELS: u32 = 9;
     pub const FS_SPLIT: u32 = 10;
     pub const SYS_SPLIT: u32 = 11;
@@ -290,6 +291,11 @@ fn appearance(app: &App) -> Form {
                 toggle(id::SCANLINES, "Scanlines", c.appearance.scanlines),
                 toggle(id::ANIMATIONS, "Animations", c.appearance.animations),
                 toggle(id::BOOT, "Boot animation", c.appearance.boot_animation),
+                toggle(
+                    id::THEME_APPS,
+                    "Apply theme to Qt and GTK apps",
+                    c.appearance.theme_apps,
+                ),
             ],
         )
         .section(
@@ -1288,6 +1294,12 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             id::BOOT => {
                 if let Some(v) = f_bool(&ch) {
                     c.appearance.boot_animation = v;
+                    save = true;
+                }
+            }
+            id::THEME_APPS => {
+                if let Some(v) = f_bool(&ch) {
+                    c.appearance.theme_apps = v;
                     save = true;
                 }
             }
