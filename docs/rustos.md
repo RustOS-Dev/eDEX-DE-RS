@@ -46,6 +46,8 @@ Other RustOS ports in `ports/desktop.list`: `jetbrains-mono-nerd` (the UI font),
 | `/sys/class/backlight/*/{brightness,max_brightness,type}`, writable by the session | brightness | M38–M40 (DRM panels), M33 |
 | CPU-time accounting in `/proc/stat` (per-CPU lines), `/proc/[pid]/stat` utime/stime, `/proc/loadavg`, `/proc/uptime` idle | the system dashboard | RustOS M43 (this port) |
 | the `svc` service manager | Services panel, Tor, the `edex` service | RustOS M43 (this port) |
+| Linux signal frames (`siginfo`, `ucontext`, `sigaltstack`), per-thread signal masks | Rust's stack-overflow handler, the Go pluggable transports (lyrebird, snowflake) | RustOS M43 (this port) |
+| `libgcc_s.so.1` (the `libunwind` port) | every eDEX binary (Rust's std, dynamically linked for musl) | RustOS M43 (this port) |
 
 ## NetworkManager D-Bus subset (`rustos-nmd`)
 
