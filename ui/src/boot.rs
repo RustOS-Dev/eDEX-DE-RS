@@ -14,7 +14,7 @@ pub const BOOT_LINES: &[&str] = &[
     "> spawning terminal session ............... ok",
     "> mounting filesystem interface ........... ok",
     "> attaching system monitor ................ ok",
-    "> handshake with hyprland ................. ok",
+    "> handshake with edex-comp ................ ok",
     "> privacy subsystems ...................... armed",
     "SYSTEM READY",
 ];

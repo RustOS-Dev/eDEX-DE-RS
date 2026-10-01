@@ -324,6 +324,58 @@ pub fn with_user(user: &[settings::Bind]) -> (Vec<Bind>, Vec<String>) {
     (binds, errors)
 }
 
+/// `SUPER+SHIFT+Return → exec foot`.
+pub fn describe(b: &Bind) -> String {
+    let mut keys = String::new();
+    for (on, name) in [
+        (b.mods.logo, "SUPER+"),
+        (b.mods.ctrl, "CTRL+"),
+        (b.mods.alt, "ALT+"),
+        (b.mods.shift, "SHIFT+"),
+    ] {
+        if on {
+            keys.push_str(name);
+        }
+    }
+    let (sym, tap) = match b.trigger {
+        Trigger::Key(s) => (s, ""),
+        Trigger::Tap(s) => (s, " (tap)"),
+    };
+    keys.push_str(&xkb::keysym_get_name(sym));
+    format!("{keys}{tap} → {}", describe_action(&b.action))
+}
+
+fn describe_action(a: &Action) -> String {
+    match a {
+        Action::Shell(args) => format!("shell {}", args.join(" ")),
+        Action::Exec(cmd) => format!("exec {cmd}"),
+        Action::Focus(d) => format!("focus {d:?}").to_lowercase(),
+        Action::Move(d) => format!("move {d:?}").to_lowercase(),
+        Action::Workspace(t) => format!("workspace {}", target_name(*t)),
+        Action::MoveToWorkspace { target, follow } => format!(
+            "movetoworkspace {}{}",
+            target_name(*target),
+            if *follow { " follow" } else { "" }
+        ),
+        Action::Cycle { reverse } => format!("cycle {}", if *reverse { "prev" } else { "next" }),
+        Action::Screenshot { region } => {
+            format!("screenshot {}", if *region { "region" } else { "output" })
+        }
+        Action::VtSwitch(n) => format!("vt {n}"),
+        other => format!("{other:?}").to_lowercase(),
+    }
+}
+
+fn target_name(t: WorkspaceTarget) -> String {
+    match t {
+        WorkspaceTarget::Id(SCRATCH_WORKSPACE) => "scratch".into(),
+        WorkspaceTarget::Id(n) => n.to_string(),
+        WorkspaceTarget::Next => "next".into(),
+        WorkspaceTarget::Prev => "prev".into(),
+        WorkspaceTarget::Empty => "empty".into(),
+    }
+}
+
 /// The binding for a key press, if any.
 pub fn lookup<'a>(binds: &'a [Bind], mods: Mods, raw_syms: &[Keysym]) -> Option<&'a Bind> {
     binds.iter().find(|b| {

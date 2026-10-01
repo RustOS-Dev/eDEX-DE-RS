@@ -10,7 +10,7 @@ members = [
     "settings",
     "sysmon",
     "notifications",
-    "hypr",
+    "comp",
     "ipc",
     "system",
     "comp-proto",

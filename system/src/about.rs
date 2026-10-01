@@ -9,12 +9,12 @@ pub struct AboutInfo {
     pub cpu: String,
     pub gpu: String,
     pub ram_total_kb: u64,
-    pub hyprland_version: String,
+    pub compositor_version: String,
     pub edex_version: String,
     pub uptime_secs: u64,
 }
 
-pub fn query(gpu: Option<String>, hyprland_version: String) -> AboutInfo {
+pub fn query(gpu: Option<String>, compositor_version: String) -> AboutInfo {
     let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
     let field = |k: &str| {
         os_release
@@ -55,7 +55,7 @@ pub fn query(gpu: Option<String>, hyprland_version: String) -> AboutInfo {
         cpu,
         gpu: gpu.unwrap_or_else(|| "unknown".into()),
         ram_total_kb: mem,
-        hyprland_version,
+        compositor_version,
         edex_version: env!("CARGO_PKG_VERSION").to_string(),
         uptime_secs: std::fs::read_to_string("/proc/uptime")
             .ok()

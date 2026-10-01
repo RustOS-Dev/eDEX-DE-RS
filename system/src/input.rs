@@ -1,7 +1,4 @@
-//! Keyboard layouts from xkb's evdev.xml and live input options via Hyprland.
-
-use anyhow::Result;
-use hypr::HyprSocket;
+//! Keyboard layouts from xkb's evdev.xml (edex-comp applies the chosen one from config.toml).
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LayoutInfo {
@@ -45,25 +42,6 @@ pub fn layouts(xml_path: &str) -> Vec<LayoutInfo> {
     }
     out.sort_by(|a, b| a.description.cmp(&b.description));
     out
-}
-
-pub struct InputApply<'a> {
-    pub kb_layout: &'a str,
-    pub kb_variant: &'a str,
-    pub kb_options: &'a str,
-    pub repeat_rate: u32,
-    pub repeat_delay: u32,
-    pub natural_scroll: bool,
-    pub tap_to_click: bool,
-    pub sensitivity: f32,
-}
-
-pub fn apply(socket: &HyprSocket, cfg: &InputApply) -> Result<()> {
-    let lua = format!(
-        "hl.config({{ input = {{ kb_layout = \"{}\", kb_variant = \"{}\", kb_options = \"{}\", repeat_rate = {}, repeat_delay = {}, sensitivity = {}, touchpad = {{ natural_scroll = {}, tap_to_click = {} }} }} }})",
-        cfg.kb_layout, cfg.kb_variant, cfg.kb_options, cfg.repeat_rate, cfg.repeat_delay, cfg.sensitivity, cfg.natural_scroll, cfg.tap_to_click
-    );
-    socket.eval(&lua).map(|_| ())
 }
 
 #[cfg(test)]

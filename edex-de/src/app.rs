@@ -15,11 +15,12 @@ use calloop::{
     timer::{TimeoutAction, Timer},
     EventLoop, Interest, Mode,
 };
-use hypr::{events::EventStream, HyprSocket, HyprState};
+use comp::EventReader;
+use comp::{CompSocket, CompState};
 use ipc::IpcServer;
 use launcher::{AppEntry, AppSearch, LaunchHistory};
 use notifications::{server::ServerEvent, NotificationServer, NotificationStore};
-use platform::{Edge, LayerSpec, OutputId, Platform, PlatformEvent, SurfaceId, SurfaceRole};
+use platform::{LayerSpec, OutputId, Platform, PlatformEvent, SurfaceId, SurfaceRole};
 use renderer::{GpuContext, SurfaceRenderer};
 use settings::{Config, ConfigWatcher};
 use sysmon::{PrivacyProbe, SysmonCollector};
@@ -41,7 +42,7 @@ use crate::events::{AppEvent, Tick};
 
 pub struct RunOptions {
     pub config_path: PathBuf,
-    pub no_hypr: bool,
+    pub no_comp: bool,
     pub smoke: Option<Duration>,
 }
 
@@ -50,7 +51,6 @@ pub struct OutputShell {
     pub output: OutputId,
     pub name: String,
     pub canvas: SurfaceId,
-    pub reservers: [SurfaceId; 4],
     pub overlay: Option<SurfaceId>,
     pub toast: Option<SurfaceId>,
     /// Tab strip bar (Top layer) and the logical rect it currently occupies.
@@ -94,9 +94,9 @@ pub struct App {
     pub outputs: Vec<OutputShell>,
     pub state: ShellState,
     pub terminal: TerminalTabs,
-    pub hypr: Option<HyprSocket>,
-    pub hypr_events: Option<EventStream>,
-    pub hypr_state: HyprState,
+    pub comp: Option<CompSocket>,
+    pub comp_events: Option<EventReader>,
+    pub comp_state: CompState,
     /// Whether each output's side panels are currently reserved (by output name).
     pub applied_sides: HashMap<String, bool>,
     pub ipc: Option<IpcServer>,
@@ -186,11 +186,11 @@ impl App {
         )
         .context("terminal setup")?;
 
-        // Hyprland
-        let (hypr, hypr_events, hypr_state) = if opts.no_hypr {
-            (None, None, HyprState::unavailable())
+        // edex-comp
+        let (comp, comp_events, comp_state) = if opts.no_comp {
+            (None, None, CompState::unavailable())
         } else {
-            connect_hypr(platform)
+            connect_comp(platform)
         };
 
         // IPC
@@ -261,9 +261,9 @@ impl App {
             outputs: Vec::new(),
             state,
             terminal,
-            hypr,
-            hypr_events,
-            hypr_state,
+            comp,
+            comp_events,
+            comp_state,
             applied_sides: HashMap::new(),
             ipc,
             notif_server,
@@ -300,7 +300,7 @@ impl App {
             pscratch: Default::default(),
         };
         app.apply_config_to_state();
-        app.update_hypr_view();
+        app.update_comp_view();
         crate::status::refresh_sysinfo(&mut app);
         crate::status::refresh_privacy(&mut app);
         app.tick_clock();
@@ -367,9 +367,9 @@ impl App {
             })
             .unwrap_or((1280.0, 720.0));
         let layout = PanelLayout::compute(lw, lh, &self.state.metrics, &self.state.layout_cfg);
-        let zones = self.zones(&layout, &name);
-        self.applied_sides
-            .insert(name.clone(), self.reserve_sides_on(&name));
+        let reserve_sides = self.reserve_sides_on(&name);
+        self.applied_sides.insert(name.clone(), reserve_sides);
+        self.send_app_area(&name, &layout, reserve_sides);
         let canvas = match platform.create_layer_surface(LayerSpec::canvas(output)) {
             Ok(id) => id,
             Err(e) => {
@@ -377,21 +377,6 @@ impl App {
                 return;
             }
         };
-        let mut reservers = [SurfaceId(0); 4];
-        for (i, (edge, size)) in [
-            (Edge::Top, zones.0),
-            (Edge::Bottom, zones.1),
-            (Edge::Left, zones.2),
-            (Edge::Right, zones.3),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            match platform.create_layer_surface(LayerSpec::reserver(output, edge, size.max(1))) {
-                Ok(id) => reservers[i] = id,
-                Err(e) => warn!("cannot create reserver on {name}: {e:#}"),
-            }
-        }
         info!(output = %name, %lw, %lh, "shell surfaces created");
         if self.outputs.is_empty() {
             // Start with the terminal focused so the user can type right away.
@@ -402,7 +387,6 @@ impl App {
             output,
             name,
             canvas,
-            reservers,
             overlay: None,
             toast: None,
             strip: None,
@@ -417,7 +401,6 @@ impl App {
         };
         let shell = self.outputs.remove(pos);
         for id in std::iter::once(shell.canvas)
-            .chain(shell.reservers)
             .chain(shell.overlay)
             .chain(shell.toast)
             .chain(shell.strip.map(|(id, _)| id))
@@ -431,19 +414,23 @@ impl App {
         info!(output = %shell.name, "output removed");
     }
 
-    fn zones(&self, layout: &PanelLayout, output: &str) -> (u32, u32, u32, u32) {
-        let (t, b, l, r) = layout.reserved_zones();
-        if self.reserve_sides_on(output) {
-            (t, b, l, r)
-        } else {
-            (t, b, 0, 0)
+    /// Tell edex-comp where windows go on `output`: below the tab strip and above the keyboard,
+    /// between the side panels (or across the full width when they step aside); maximized
+    /// windows always get the full width.
+    fn send_app_area(&self, output: &str, layout: &PanelLayout, reserve_sides: bool) {
+        let Some(comp) = &self.comp else {
+            return;
+        };
+        let (tiled, maximized) = app_areas(layout, reserve_sides);
+        if let Err(e) = comp.set_app_area(output, tiled, maximized) {
+            warn!("cannot tell edex-comp the app area of {output}: {e:#}");
         }
     }
 
     /// Side panels keep their space unless the user hid them or a maximized window on this
     /// output's workspace wants the full width.
     pub fn reserve_sides_on(&self, output: &str) -> bool {
-        self.config.layout.reserve_side_panels && !self.hypr_state.maximized_on(output)
+        self.config.layout.reserve_side_panels && !self.comp_state.maximized_on(output)
     }
 
     pub fn primary(&self) -> Option<&OutputShell> {
@@ -456,11 +443,10 @@ impl App {
                 || o.overlay == Some(id)
                 || o.toast == Some(id)
                 || o.strip.is_some_and(|(s, _)| s == id)
-                || o.reservers.contains(&id)
         })
     }
 
-    /// Recompute the layout of every canvas and push the reserver sizes to the compositor.
+    /// Recompute the layout of every canvas and tell the compositor the app areas.
     pub fn relayout(&mut self, platform: &mut Platform<AppEvent>) {
         let metrics = self.state.metrics;
         let cfg = self.state.layout_cfg;
@@ -481,11 +467,13 @@ impl App {
             let (w, h) = platform.logical_size(shell.canvas).unwrap_or(shell.size);
             shell.size = (w, h);
             let layout = PanelLayout::compute(w as f32, h as f32, &metrics, &cfg);
-            let (t, b, l, r) = layout.reserved_zones();
-            let (l, r) = if reserve_sides { (l, r) } else { (0, 0) };
-            for (id, size) in shell.reservers.iter().zip([t, b, l, r]) {
-                if id.0 != 0 {
-                    platform.set_reserver_size(*id, size.max(1));
+            if let Some(comp) = &self.comp {
+                let (tiled, maximized) = app_areas(&layout, reserve_sides);
+                if let Err(e) = comp.set_app_area(&shell.name, tiled, maximized) {
+                    warn!(
+                        "cannot tell edex-comp the app area of {}: {e:#}",
+                        shell.name
+                    );
                 }
             }
             if i == 0 {
@@ -502,7 +490,7 @@ impl App {
                     .resize(cols, rows, metrics.cell_w, metrics.cell_h);
             }
         }
-        self.update_hypr_view();
+        self.update_comp_view();
         self.sync_strip_surfaces(platform);
     }
 
@@ -815,9 +803,15 @@ impl App {
     /// the terminal, so when this workspace has windows switch to an empty one first, where the
     /// terminal is visible (SUPER+1..9 goes back).
     pub fn focus_shell(&mut self, platform: &mut Platform<AppEvent>) {
-        if let Some(h) = &self.hypr {
-            if h.active_workspace_windows().unwrap_or(0) > 0 {
-                if let Err(e) = h.focus_empty_workspace() {
+        if let Some(c) = &self.comp {
+            let ws = self.comp_state.active_workspace_of(None);
+            let covered = self
+                .comp_state
+                .windows
+                .iter()
+                .any(|w| Some(w.workspace) == ws && !w.minimized);
+            if covered {
+                if let Err(e) = c.focus_empty_workspace() {
                     warn!("switching to an empty workspace: {e:#}");
                 }
             }
@@ -924,8 +918,9 @@ impl App {
         self.state.status.dnd = self.store.dnd;
     }
 
-    /// Persist the config, apply it to the shell and export the Hyprland side.
-    pub fn commit_config(&mut self, platform: &mut Platform<AppEvent>, export_hypr: bool) {
+    /// Persist the config, apply it to the shell and, for compositor settings (display, input,
+    /// window manager, idle), have edex-comp apply them right away.
+    pub fn commit_config(&mut self, platform: &mut Platform<AppEvent>, reload_compositor: bool) {
         self.config.sanitize();
         if let Err(e) = settings::save(&self.opts.config_path, &self.config) {
             warn!("cannot save config: {e:#}");
@@ -933,23 +928,30 @@ impl App {
         }
         self.apply_config_to_state();
         self.relayout(platform);
-        if export_hypr {
-            self.export_hypr();
+        if reload_compositor {
+            self.reload_compositor();
         }
         self.mark_all_dirty();
     }
 
-    pub fn export_hypr(&mut self) {
-        let dir = settings::paths::hypr_config_dir();
-        match settings::hypr_export::export(&self.config, &dir, "hyprlock") {
-            Ok(()) => {
-                if let Some(h) = &self.hypr {
-                    if let Err(e) = h.reload() {
-                        warn!("hyprctl reload failed: {e:#}");
-                    }
+    /// Lock the session: edex-comp starts the lock screen.
+    pub fn lock_screen(&self) {
+        match &self.comp {
+            Some(c) => {
+                if let Err(e) = c.lock() {
+                    warn!("cannot lock: {e:#}");
                 }
             }
-            Err(e) => warn!("cannot export Hyprland config: {e:#}"),
+            None => warn!("cannot lock: edex-comp is not running"),
+        }
+    }
+
+    /// edex-comp watches config.toml too; asking it to reload applies the change at once.
+    pub fn reload_compositor(&mut self) {
+        if let Some(c) = &self.comp {
+            if let Err(e) = c.reload() {
+                warn!("edex-comp reload failed: {e:#}");
+            }
         }
     }
 
@@ -977,61 +979,47 @@ impl App {
         true
     }
 
-    // ─── Hyprland view ──────────────────────────────────────────────────────
+    // ─── Compositor view ────────────────────────────────────────────────────
 
-    pub fn update_hypr_view(&mut self) {
-        self.state.hypr_connected = self.hypr_state.connected;
-        self.state.workspaces = self.hypr_state.workspace_strip(None);
-        self.state.active_window = self
-            .hypr_state
-            .active_window
-            .as_ref()
-            .map(|(_, t)| t.clone());
-        self.state.windows = self.hypr_state.window_tabs();
+    pub fn update_comp_view(&mut self) {
+        self.state.comp_connected = self.comp_state.connected;
+        self.state.workspaces = self.comp_state.workspace_strip(None);
+        self.state.active_window = self.comp_state.active_window().map(|(_, t)| t);
+        self.state.windows = self.comp_state.window_tabs();
         let primary = self.primary().map(|o| o.name.clone()).unwrap_or_default();
-        let tiled = self.hypr_state.tiled_on(&primary);
+        let tiled = self.comp_state.tiled_on(&primary);
         self.state.apps_cover_terminal = tiled;
         self.state.wide_tab_strip = tiled && !self.reserve_sides_on(&primary);
-        if self.hypr_state.connected {
-            self.state.kb_layout = self.hypr_state.short_layout();
+        if self.comp_state.connected {
+            self.state.kb_layout = self.comp_state.short_layout();
         } else {
             self.state.kb_layout = self.config.input.kb_layout.clone();
         }
         self.mark_canvas_dirty();
     }
 
-    pub fn drain_hypr(&mut self, platform: &mut Platform<AppEvent>) {
-        let Some(stream) = self.hypr_events.as_mut() else {
+    pub fn drain_comp(&mut self, platform: &mut Platform<AppEvent>) {
+        let Some(stream) = self.comp_events.as_mut() else {
             return;
         };
-        let mut events = Vec::new();
-        match stream.drain(&mut events) {
-            Ok(true) => {}
-            Ok(false) => {
-                warn!("Hyprland event socket closed");
-                self.hypr_events = None;
-                self.hypr_state.connected = false;
-            }
+        let events = match stream.drain() {
+            Ok(events) => events,
             Err(e) => {
-                warn!("Hyprland events: {e:#}");
+                warn!("edex-comp event stream ended: {e:#}");
+                self.comp_events = None;
+                self.comp_state.connected = false;
+                self.update_comp_view();
+                return;
             }
-        }
-        let mut resync = false;
+        };
         for ev in &events {
-            if self.hypr_state.apply(ev) {
-                resync = true;
-            }
-            if let hypr::HyprEvent::Bell(_) = ev {
+            self.comp_state.apply(ev);
+            if matches!(ev, comp::Event::Bell) {
                 self.state.terminal.frame.bell = true;
             }
         }
-        if resync {
-            if let Some(sock) = &self.hypr {
-                self.hypr_state.resync(sock);
-            }
-        }
         if !events.is_empty() {
-            self.update_hypr_view();
+            self.update_comp_view();
             // A window was maximized or restored: give it (or take back) the side panels' space.
             let changed = self
                 .outputs
@@ -1302,7 +1290,7 @@ impl App {
             }
             AppEvent::Notify(ev) => crate::status::notification_event(self, platform, ev),
             AppEvent::Sys(reply) => crate::status::system_reply(self, platform, reply),
-            AppEvent::HyprReadable => self.drain_hypr(platform),
+            AppEvent::CompReadable => self.drain_comp(platform),
             AppEvent::IpcReadable => crate::ipc_handler::drain(self, platform),
             AppEvent::Tick(t) => self.handle_tick(platform, t),
         }
@@ -1372,28 +1360,29 @@ pub fn load_all_themes() -> BTreeMap<String, Theme> {
     themes
 }
 
-fn connect_hypr(
+fn connect_comp(
     platform: &mut Platform<AppEvent>,
-) -> (Option<HyprSocket>, Option<EventStream>, HyprState) {
-    let Some(socket) = HyprSocket::from_env() else {
-        info!("HYPRLAND_INSTANCE_SIGNATURE not set; running without Hyprland integration");
-        return (None, None, HyprState::unavailable());
+) -> (Option<CompSocket>, Option<EventReader>, CompState) {
+    let Some(socket) = CompSocket::from_env() else {
+        info!("edex-comp is not running; windows and workspaces are unavailable");
+        return (None, None, CompState::unavailable());
     };
-    let mut state = HyprState::default();
-    state.resync(&socket);
-    let events = hypr::instance_dir().and_then(|dir| match EventStream::connect(&dir) {
+    // Subscribe first so no change between the snapshot and the stream is lost.
+    let events = match socket.events() {
         Ok(s) => Some(s),
         Err(e) => {
-            warn!("Hyprland event socket: {e:#}");
+            warn!("edex-comp event stream: {e:#}");
             None
         }
-    });
+    };
+    let mut state = CompState::default();
+    state.resync(&socket);
     if let Some(stream) = &events {
-        if let Err(e) = register_readable(platform, stream.stream(), AppEvent::HyprReadable) {
-            warn!("hypr events not registered: {e:#}");
+        if let Err(e) = register_readable(platform, stream.stream(), AppEvent::CompReadable) {
+            warn!("edex-comp events not registered: {e:#}");
         }
     }
-    info!(version = %state.version, monitors = state.monitors.len(), "connected to Hyprland");
+    info!(version = %state.version, monitors = state.monitors.len(), "connected to edex-comp");
     (Some(socket), events, state)
 }
 
@@ -1426,7 +1415,7 @@ pub trait CloneEvent {
 impl CloneEvent for AppEvent {
     fn clone_event(&self) -> Self {
         match self {
-            AppEvent::HyprReadable => AppEvent::HyprReadable,
+            AppEvent::CompReadable => AppEvent::CompReadable,
             AppEvent::IpcReadable => AppEvent::IpcReadable,
             AppEvent::Tick(t) => AppEvent::Tick(*t),
             _ => unreachable!("only marker events are cloned"),
@@ -1464,4 +1453,42 @@ pub fn run(opts: RunOptions) -> Result<i32> {
         return Ok(if ok { 0 } else { 1 });
     }
     Ok(0)
+}
+
+/// The rectangles application windows fill on an output: (tiled, maximized), in the output's
+/// logical coordinates.
+pub fn app_areas(layout: &PanelLayout, reserve_sides: bool) -> (comp::Rect, comp::Rect) {
+    let (t, b, l, r) = layout.reserved_zones();
+    let (w, h) = (layout.width.round() as i32, layout.height.round() as i32);
+    let (t, b, l, r) = (t as i32, b as i32, l as i32, r as i32);
+    let (l, r) = if reserve_sides { (l, r) } else { (0, 0) };
+    let height = (h - t - b).max(1);
+    (
+        comp::Rect::new(l, t, (w - l - r).max(1), height),
+        comp::Rect::new(0, t, w.max(1), height),
+    )
+}
+
+#[cfg(test)]
+mod app_area_tests {
+    use super::*;
+
+    #[test]
+    fn areas_follow_the_panels() {
+        let layout = PanelLayout::compute(
+            1920.0,
+            1080.0,
+            &ui::layout::Metrics::default(),
+            &ui::layout::LayoutConfig::default(),
+        );
+        let (t, b, l, r) = layout.reserved_zones();
+        let (tiled, max) = app_areas(&layout, true);
+        assert_eq!(tiled.x, l as i32);
+        assert_eq!(tiled.y, t as i32);
+        assert_eq!(tiled.w, 1920 - l as i32 - r as i32);
+        assert_eq!(tiled.h, 1080 - t as i32 - b as i32);
+        assert_eq!((max.x, max.w), (0, 1920));
+        let (tiled, _) = app_areas(&layout, false);
+        assert_eq!((tiled.x, tiled.w), (0, 1920));
+    }
 }

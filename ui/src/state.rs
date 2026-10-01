@@ -275,7 +275,7 @@ pub struct ShellState {
     /// Side panels are not reserved and apps are open: the tab strip spans the full width.
     pub wide_tab_strip: bool,
     pub kb_layout: String,
-    pub hypr_connected: bool,
+    pub comp_connected: bool,
     pub live_iso: bool,
     pub sysinfo: SysInfo,
     pub status: StatusInfo,
@@ -316,7 +316,7 @@ impl ShellState {
             apps_cover_terminal: false,
             wide_tab_strip: false,
             kb_layout: String::from("us"),
-            hypr_connected: false,
+            comp_connected: false,
             live_iso: false,
             sysinfo: SysInfo::default(),
             status: StatusInfo::default(),

@@ -213,9 +213,10 @@ pub fn parse_mode(s: &str) -> ModeRule {
     }
 }
 
-/// `auto` or `XxY`.
+/// `auto`, `XxY` or `X,Y`.
 pub fn parse_position(s: &str) -> Option<(i32, i32)> {
-    let (x, y) = s.trim().split_once('x')?;
+    let s = s.trim();
+    let (x, y) = s.split_once(',').or_else(|| s.split_once('x'))?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
@@ -244,6 +245,7 @@ mod tests {
         );
         assert_eq!(parse_mode("0x0"), ModeRule::Preferred);
         assert_eq!(parse_position("1920x0"), Some((1920, 0)));
+        assert_eq!(parse_position("-1280, 0"), Some((-1280, 0)));
         assert_eq!(parse_position("auto"), None);
     }
 

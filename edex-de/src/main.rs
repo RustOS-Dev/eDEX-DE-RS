@@ -1,4 +1,4 @@
-//! eDEX-DE: the shell process. `edex-de run` draws the panels on Hyprland's layer shell;
+//! eDEX-DE: the shell process. `edex-de run` draws the panels on edex-comp's layer shell;
 //! `edex-de ipc …` talks to a running shell.
 
 mod app;
@@ -17,20 +17,16 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "edex-de",
-    version,
-    about = "eDEX-DE desktop shell for Hyprland"
-)]
+#[command(name = "edex-de", version, about = "eDEX-DE desktop shell for RustOS")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
     /// Configuration file (default: $XDG_CONFIG_HOME/edex-de/config.toml).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
-    /// Do not connect to the Hyprland sockets (for running under another compositor).
+    /// Do not connect to edex-comp (for running under another compositor).
     #[arg(long, global = true)]
-    no_hypr: bool,
+    no_comp: bool,
     /// Run for N seconds, print a JSON report and exit (CI).
     #[arg(long, global = true, value_name = "SECS")]
     smoke_test: Option<u64>,
@@ -55,7 +51,7 @@ fn main() {
             init_logging();
             match app::run(app::RunOptions {
                 config_path: cli.config.unwrap_or_else(settings::config_path),
-                no_hypr: cli.no_hypr,
+                no_comp: cli.no_comp,
                 smoke: cli.smoke_test.map(Duration::from_secs),
             }) {
                 Ok(code) => code,

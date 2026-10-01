@@ -44,7 +44,7 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
     x += host_w + 16.0;
 
     // Workspaces
-    if state.hypr_connected && !state.workspaces.is_empty() {
+    if state.comp_connected && !state.workspaces.is_empty() {
         let ws_h = rect.h - 10.0;
         for ws in &state.workspaces {
             let w = if ws.name.chars().count() > 2 {

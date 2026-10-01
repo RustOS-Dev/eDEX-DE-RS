@@ -1,15 +1,15 @@
 [package]
-name = "hypr"
+name = "comp"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE hypr crate"
+description = "The shell's view of edex-comp: control requests and a state model kept current by events"
 
 [dependencies]
+comp-proto = { path = "../comp-proto" }
 ui = { path = "../ui" }
-serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

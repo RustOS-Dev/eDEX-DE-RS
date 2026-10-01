@@ -116,7 +116,7 @@ fn launch_selected(app: &mut App, platform: &mut Platform<AppEvent>, force_termi
     };
     let opts = launcher::LaunchOptions {
         terminal_command: app.config.launcher.terminal_command.clone(),
-        via_hyprland: app.hypr.is_some(),
+        via_compositor: app.comp.is_some(),
         force_terminal,
     };
     match launcher::launch(&entry, &opts) {
@@ -130,19 +130,11 @@ fn run_power(app: &mut App, platform: &mut Platform<AppEvent>, action: PowerActi
     use system::LogindAction as L;
     app.close_overlay(platform);
     match action {
-        PowerAction::Lock => {
-            let _ = launcher::runner::spawn_detached(
-                "hyprlock || loginctl lock-session",
-                app.hypr.is_some(),
-            );
-        }
+        PowerAction::Lock => app.lock_screen(),
         PowerAction::Logout => {
-            let ok = app.hypr.as_ref().map(|h| h.exit().is_ok()).unwrap_or(false);
+            // Ending the compositor ends the session; the greeter comes back.
+            let ok = app.comp.as_ref().map(|c| c.exit().is_ok()).unwrap_or(false);
             if !ok {
-                let _ = launcher::runner::spawn_detached(
-                    "loginctl terminate-session \"$XDG_SESSION_ID\"",
-                    false,
-                );
                 app.quit = true;
             }
         }

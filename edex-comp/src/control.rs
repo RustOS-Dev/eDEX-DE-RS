@@ -150,6 +150,9 @@ impl<B: Backend + 'static> EdexState<B> {
                 self.exit_session();
                 Reply::ok()
             }
+            Request::Binds => Reply::with_data(serde_json::json!({
+                "binds": self.config.binds.iter().map(crate::binds::describe).collect::<Vec<_>>(),
+            })),
             Request::Reload => {
                 self.reload_config();
                 Reply::with_data(serde_json::json!({ "bind_errors": self.config.bind_errors }))

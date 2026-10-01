@@ -610,6 +610,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "comp"
+version = "3.2.0"
+dependencies = [
+ "anyhow",
+ "comp-proto",
+ "serde_json",
+ "tracing",
+ "ui",
+]
+
+[[package]]
 name = "comp-proto"
 version = "3.2.0"
 dependencies = [
@@ -893,7 +904,7 @@ dependencies = [
  "calloop 0.14.4",
  "chrono",
  "clap",
- "hypr",
+ "comp",
  "ipc",
  "launcher",
  "notifications",
@@ -1467,17 +1478,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hypr"
-version = "3.2.0"
-dependencies = [
- "anyhow",
- "serde",
- "serde_json",
- "tracing",
- "ui",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1728,8 +1728,8 @@ name = "launcher"
 version = "3.2.0"
 dependencies = [
  "anyhow",
+ "comp",
  "fuzzy-matcher",
- "hypr",
  "libc",
  "rustix 1.1.5",
  "serde",
@@ -3355,8 +3355,8 @@ version = "3.2.0"
 dependencies = [
  "anyhow",
  "async-io",
+ "comp",
  "futures-util",
- "hypr",
  "launcher",
  "libc",
  "roxmltree 0.21.1",

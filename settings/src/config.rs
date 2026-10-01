@@ -93,7 +93,7 @@ impl Default for Launcher {
     fn default() -> Self {
         Self {
             show_hidden: false,
-            terminal_command: "kitty -e".into(),
+            terminal_command: "foot".into(),
         }
     }
 }

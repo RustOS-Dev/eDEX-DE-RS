@@ -36,10 +36,3 @@ pub fn system_share_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/usr/share/edex-de"))
 }
-
-pub fn hypr_config_dir() -> PathBuf {
-    std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home().join(".config"))
-        .join("hypr")
-}

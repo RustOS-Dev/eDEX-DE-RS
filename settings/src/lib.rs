@@ -1,7 +1,7 @@
-//! eDEX-DE configuration: `~/.config/edex-de/config.toml`, live reload and Hyprland export.
+//! eDEX-DE configuration: `~/.config/edex-de/config.toml` and live reload. The shell and
+//! edex-comp both read it.
 
 pub mod config;
-pub mod hypr_export;
 pub mod io;
 pub mod paths;
 

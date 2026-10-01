@@ -1,6 +1,7 @@
 //! Launch applications detached from the shell process.
 
 use std::{
+    os::unix::process::CommandExt,
     path::PathBuf,
     process::{Command, Stdio},
 };
@@ -14,16 +15,17 @@ use crate::desktop::{expand_exec, AppEntry};
 pub struct LaunchOptions {
     /// Command prefix used for `Terminal=true` entries or forced terminal launches.
     pub terminal_command: String,
-    /// When true, launch through Hyprland (`hl.dsp.exec_cmd`) so it opens on the current workspace.
-    pub via_hyprland: bool,
+    /// When true, launch through edex-comp so it gets the session environment and opens on the
+    /// current workspace.
+    pub via_compositor: bool,
     pub force_terminal: bool,
 }
 
 impl Default for LaunchOptions {
     fn default() -> Self {
         Self {
-            terminal_command: "kitty -e".into(),
-            via_hyprland: false,
+            terminal_command: "foot".into(),
+            via_compositor: false,
             force_terminal: false,
         }
     }
@@ -48,56 +50,43 @@ pub fn command_line(app: &AppEntry, opts: &LaunchOptions) -> String {
 pub fn launch(app: &AppEntry, opts: &LaunchOptions) -> Result<()> {
     let cmd = command_line(app, opts);
     info!(app = %app.id, %cmd, "launching");
-    spawn_detached(&cmd, opts.via_hyprland)
+    spawn_detached(&cmd, opts.via_compositor)
 }
 
 /// Spawn an arbitrary shell command detached from the shell.
-pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
-    if via_hyprland {
-        if let Some(socket) = hypr::HyprSocket::from_env() {
+pub fn spawn_detached(cmd: &str, via_compositor: bool) -> Result<()> {
+    if via_compositor {
+        if let Some(socket) = comp::CompSocket::from_env() {
             match socket.exec(cmd) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
-                    tracing::warn!("launching through Hyprland failed, spawning directly: {e:#}")
+                    tracing::warn!("launching through edex-comp failed, spawning directly: {e:#}")
                 }
             }
         }
     }
-    // In its own transient scope when systemd is around: otherwise the app lives in the shell's
-    // service cgroup and a shell restart (or crash + Restart=on-failure) would kill it.
-    let mut launcher = Command::new("setsid");
-    launcher.arg("-f");
-    if in_systemd_user_session() {
-        launcher.args([
-            "systemd-run",
-            "--user",
-            "--scope",
-            "--quiet",
-            "--collect",
-            "--",
-        ]);
-    }
-    let mut child = launcher
-        .arg("sh")
+    let mut command = Command::new("/bin/sh");
+    command
         .arg("-c")
         .arg(cmd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    // In its own session, so a shell restart (or crash) does not take the app with it.
+    // SAFETY: setsid is async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = command
         .spawn()
         .with_context(|| format!("spawning `{cmd}`"))?;
-    // `setsid -f` forks and exits immediately; reap it so it never becomes a zombie.
     std::thread::spawn(move || {
         let _ = child.wait();
     });
     Ok(())
-}
-
-fn in_systemd_user_session() -> bool {
-    let bus = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(|d| PathBuf::from(d).join("systemd/private"))
-        .is_some_and(|p| p.exists());
-    bus && std::path::Path::new("/usr/bin/systemd-run").exists()
 }
 
 /// Path of the launch history file.
@@ -133,7 +122,7 @@ mod tests {
         };
         assert_eq!(
             command_line(&app, &LaunchOptions::default()),
-            "cd '/tmp' && kitty -e htop"
+            "cd '/tmp' && foot htop"
         );
     }
 

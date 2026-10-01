@@ -136,7 +136,7 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
         }
         Request::Reload => {
             app.reload_config(platform);
-            app.export_hypr();
+            app.reload_compositor();
             Response::ok()
         }
         Request::State => Response::with_data(state_json(app, platform)),
@@ -163,11 +163,11 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
         }
         Request::Action { name } => match name.as_str() {
             "install" => {
-                let _ = launcher::runner::spawn_detached("edex-install", app.hypr.is_some());
+                let _ = launcher::runner::spawn_detached("edex-install", app.comp.is_some());
                 Response::ok()
             }
             "lock" => {
-                let _ = launcher::runner::spawn_detached("hyprlock", app.hypr.is_some());
+                app.lock_screen();
                 Response::ok()
             }
             "new-tab" => {
@@ -216,7 +216,6 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
                 "name": o.name,
                 "size": [o.size.0, o.size.1],
                 "canvas_configured": platform.is_configured(o.canvas),
-                "reservers": o.reservers.iter().map(|r| platform.is_configured(*r)).collect::<Vec<_>>(),
                 "overlay": o.overlay.map(|s| platform.is_configured(s)),
                 "toast": o.toast.map(|s| platform.is_configured(s)),
                 "scale": platform.scale(o.canvas),
@@ -229,7 +228,7 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "frames": app.frames,
         "gpu": app.gpu.adapter_info(),
         "outputs": outputs,
-        "hyprland": {"connected": app.hypr_state.connected, "version": app.hypr_state.version, "workspaces": app.state.workspaces.len(), "active_window": app.state.active_window},
+        "compositor": {"connected": app.comp_state.connected, "version": app.comp_state.version, "workspaces": app.state.workspaces.len(), "windows": app.comp_state.windows.len(), "active_window": app.state.active_window},
         "overlay": app.state.overlay.map(|k| format!("{k:?}").to_lowercase()),
         "focus": format!("{:?}", app.state.focus).to_lowercase(),
         "terminal": {"tabs": app.terminal.len(), "active": app.terminal.active_index(), "grid": app.terminal.grid_size(), "title": app.state.terminal.frame.title},

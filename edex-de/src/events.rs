@@ -9,7 +9,7 @@ pub enum AppEvent {
     Term(TermEvent),
     Notify(ServerEvent),
     Sys(SysReply),
-    HyprReadable,
+    CompReadable,
     IpcReadable,
     Tick(Tick),
 }

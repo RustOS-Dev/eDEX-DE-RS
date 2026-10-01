@@ -20,7 +20,7 @@ use std::{
     thread,
 };
 
-use hypr::HyprSocket;
+use comp::CompSocket;
 pub use power::LogindAction;
 pub use runner::{CommandRunner, FakeRunner, RealRunner};
 pub use services::UnitAction;
@@ -173,12 +173,12 @@ impl SystemBackend {
         thread::Builder::new()
             .name("edex-system".into())
             .spawn(move || {
-                let hypr = HyprSocket::from_env();
+                let comp = CompSocket::from_env();
                 while let Ok(first) = rx.recv() {
                     let mut pending = vec![first];
                     pending.extend(rx.try_iter());
                     for req in schedule(pending) {
-                        for r in handle(&*runner, hypr.as_ref(), req, &sink) {
+                        for r in handle(&*runner, comp.as_ref(), req, &sink) {
                             sink(r);
                         }
                     }
@@ -249,7 +249,7 @@ fn done(what: &str, res: anyhow::Result<()>) -> SysReply {
 
 fn handle(
     r: &dyn CommandRunner,
-    hypr: Option<&HyprSocket>,
+    comp: Option<&CompSocket>,
     req: SysRequest,
     sink: &Arc<dyn Fn(SysReply) + Send + Sync>,
 ) -> Vec<SysReply> {
@@ -371,7 +371,7 @@ fn handle(
             night_light,
             night_temp,
         } => vec![SysReply::Display(display::query(
-            hypr,
+            comp,
             night_light,
             night_temp,
         ))],
@@ -383,47 +383,20 @@ fn handle(
             transform,
             disabled,
         } => {
-            let res = hypr
-                .ok_or_else(|| anyhow::anyhow!("Hyprland not connected"))
-                .and_then(|s| {
-                    display::apply_monitor(s, &name, &mode, &position, scale, transform, disabled)
-                });
-            vec![done("monitor", res)]
+            // The settings panel saved the rule in config.toml; edex-comp applies it.
+            let _ = (name, mode, position, scale, transform, disabled);
+            vec![done("monitor", display::reload(comp))]
         }
         Q::NightLight { on, temp } => {
-            vec![done("night-light", display::set_night_light(r, on, temp))]
+            let _ = (on, temp);
+            vec![done("night-light", display::reload(comp))]
         }
         Q::InputLayouts => vec![SysReply::InputLayouts(input::layouts(
             "/usr/share/X11/xkb/rules/evdev.xml",
         ))],
-        Q::ApplyInput {
-            kb_layout,
-            kb_variant,
-            kb_options,
-            repeat_rate,
-            repeat_delay,
-            natural_scroll,
-            tap_to_click,
-            sensitivity,
-        } => {
-            let res = hypr
-                .ok_or_else(|| anyhow::anyhow!("Hyprland not connected"))
-                .and_then(|s| {
-                    input::apply(
-                        s,
-                        &input::InputApply {
-                            kb_layout: &kb_layout,
-                            kb_variant: &kb_variant,
-                            kb_options: &kb_options,
-                            repeat_rate,
-                            repeat_delay,
-                            natural_scroll,
-                            tap_to_click,
-                            sensitivity,
-                        },
-                    )
-                });
-            vec![done("input", res)]
+        Q::ApplyInput { .. } => {
+            // Saved in config.toml by the settings panel; edex-comp applies it.
+            vec![done("input", display::reload(comp))]
         }
         Q::PrivacyQuery => vec![SysReply::Privacy(privacy::query(r))],
         Q::TorMode(m) => vec![
@@ -470,7 +443,7 @@ fn handle(
             SysReply::Fprint(fprint::query(&user)),
         ],
         Q::AboutQuery { gpu } => {
-            let hv = hypr
+            let hv = comp
                 .and_then(|s| s.version().ok())
                 .unwrap_or_else(|| "not connected".into());
             vec![SysReply::About(about::query(gpu, hv))]

@@ -205,22 +205,17 @@ pub enum WindowAction {
     Close,
 }
 
-/// Apply a window control through Hyprland; the resulting events refresh the tab strip.
+/// Apply a window control through edex-comp; the resulting events refresh the tab strip.
 pub fn window_action(app: &mut App, address: &str, action: WindowAction) {
-    let Some(h) = &app.hypr else {
+    let (Some(c), Some(id)) = (&app.comp, comp::model::window_id(address)) else {
         return;
     };
     let result = match action {
-        WindowAction::Focus => h.focus_window(address),
-        WindowAction::Minimize => h.minimize_window(address),
-        WindowAction::Restore => match app.hypr_state.active_workspace_of(None) {
-            Some(ws) => h.restore_window(address, ws),
-            None => Ok(()),
-        },
-        WindowAction::ToggleMaximize => h
-            .focus_window(address)
-            .and_then(|_| h.toggle_maximized(address)),
-        WindowAction::Close => h.close_window(address),
+        WindowAction::Focus => c.focus_window(id),
+        WindowAction::Minimize => c.minimize_window(id),
+        WindowAction::Restore => c.restore_window(id, app.comp_state.active_workspace_of(None)),
+        WindowAction::ToggleMaximize => c.focus_window(id).and_then(|_| c.toggle_maximized(id)),
+        WindowAction::Close => c.close_window(id),
     };
     if let Err(e) = result {
         tracing::warn!("window {action:?} {address}: {e:#}");
@@ -614,7 +609,7 @@ fn canvas_click(
             }
         }
         HitTarget::Workspace(id) => {
-            if let Some(h) = &app.hypr {
+            if let Some(h) = &app.comp {
                 if let Err(e) = h.focus_workspace(id as i32) {
                     tracing::warn!("workspace switch: {e:#}");
                 }

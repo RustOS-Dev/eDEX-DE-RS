@@ -203,6 +203,8 @@ pub enum Request {
     Exit,
     /// Re-read `config.toml` (input, outputs, look, binds, idle, night light).
     Reload,
+    /// Replies `{"binds": ["SUPER+Q → close", …]}`.
+    Binds,
     /// Turn every output on or off.
     Dpms {
         on: bool,

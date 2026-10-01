@@ -376,16 +376,16 @@ fn display(app: &App) -> Form {
             "Outputs",
             items,
             None,
-            if app.hypr.is_some() {
+            if app.comp.is_some() {
                 "no monitors reported"
             } else {
-                "Hyprland not connected"
+                "edex-comp is not running"
             },
         )],
     );
     if let Some(m) = mons.get(s.monitor) {
-        let mut modes = vec!["preferred".to_string(), "highrr".into(), "highres".into()];
-        modes.extend(m.available_modes.iter().cloned());
+        let mut modes = vec!["preferred".to_string()];
+        modes.extend(m.modes.iter().cloned());
         form = form.section(
             format!("Configure {}", m.name),
             vec![
@@ -401,7 +401,7 @@ fn display(app: &App) -> Form {
     form.section(
         "Night light",
         vec![
-            toggle(id::NIGHT, "Night light (hyprsunset)", c.display.night_light),
+            toggle(id::NIGHT, "Night light", c.display.night_light),
             slider(
                 id::NIGHT_TEMP,
                 "Colour temperature",
@@ -847,8 +847,8 @@ fn security(app: &App) -> Form {
     let keyring = app.sysmon.process_running("gnome-keyring-d");
     Form::default()
         .section("Screen lock", vec![
-            button(id::LOCK_NOW, "hyprlock", "LOCK NOW"),
-            note(0, "Lock timing lives under Power → Idle; the lock screen uses the eDEX theme from /usr/share/edex-de/hypr/hyprlock.conf."),
+            button(id::LOCK_NOW, "Lock screen", "LOCK NOW"),
+            note(0, "Lock timing lives under Power → Idle; the lock screen is edex-greeter in the eDEX theme."),
         ])
         .section("Fingerprint", fp)
         .section("System", vec![
@@ -1023,30 +1023,17 @@ const LAYOUTS: [&str; 3] = ["dwindle", "master", "scrolling"];
 fn wm(app: &App) -> Form {
     let c = &app.config.wm;
     let binds = app
-        .hypr
+        .comp
         .as_ref()
-        .and_then(|h| h.binds().ok())
+        .and_then(|c| c.binds().ok())
         .map(|b| {
-            let mut lines: Vec<String> = b
-                .iter()
-                .filter(|x| !x.description.is_empty() || !x.dispatcher.is_empty())
-                .take(60)
-                .map(|x| {
-                    format!(
-                        "{}{}  →  {} {}",
-                        modmask_name(x.modmask),
-                        x.key,
-                        x.dispatcher,
-                        x.arg
-                    )
-                })
-                .collect();
-            if lines.is_empty() {
-                lines.push("no binds reported".into());
+            if b.is_empty() {
+                "no bindings".to_string()
+            } else {
+                b.join("\n")
             }
-            lines.join("\n")
         })
-        .unwrap_or_else(|| "Hyprland not connected".into());
+        .unwrap_or_else(|| "edex-comp is not running".into());
     Form::default()
         .section(
             "Tiling",
@@ -1104,35 +1091,10 @@ fn wm(app: &App) -> Form {
                 ),
                 toggle(id::WM_ANIM, "Window animations", c.animations),
                 toggle(id::BLUR, "Blur", c.blur),
-                button(
-                    id::RELOAD,
-                    "Regenerate and reload Hyprland config",
-                    "RELOAD",
-                ),
+                button(id::RELOAD, "Reload compositor settings", "RELOAD"),
             ],
         )
         .section("Key bindings", vec![note(id::BINDS, &binds)])
-}
-
-fn modmask_name(mask: u32) -> String {
-    let mut parts = Vec::new();
-    if mask & 64 != 0 {
-        parts.push("SUPER");
-    }
-    if mask & 4 != 0 {
-        parts.push("CTRL");
-    }
-    if mask & 8 != 0 {
-        parts.push("ALT");
-    }
-    if mask & 1 != 0 {
-        parts.push("SHIFT");
-    }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!("{}+", parts.join("+"))
-    }
 }
 
 const CURSORS: [&str; 3] = ["block", "underline", "beam"];
@@ -1200,7 +1162,7 @@ fn about(app: &App) -> Form {
                 "Memory",
                 format!("{:.1} GiB", a.ram_total_kb as f64 / 1_048_576.0),
             ),
-            info(0, "Hyprland", a.hyprland_version.clone()),
+            info(0, "Compositor", a.compositor_version.clone()),
             info(0, "eDEX-DE", a.edex_version.clone()),
             info(
                 0,
@@ -1249,7 +1211,7 @@ fn f_text(c: &Change) -> Option<String> {
 
 pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: Change) {
     let mut save = false;
-    let mut hypr = false;
+    let mut comp_settings = false;
     {
         let c = &mut app.config;
         match id {
@@ -1358,90 +1320,90 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
                     _ => {}
                 }
                 save = true;
-                hypr = true;
+                comp_settings = true;
             }
             id::KB_VARIANT => {
                 if let Some(t) = f_text(&ch) {
                     c.input.kb_variant = t;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::KB_OPTIONS => {
                 if let Some(t) = f_text(&ch) {
                     c.input.kb_options = t;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::REPEAT_RATE => {
                 if let Some(v) = f_u32(&ch) {
                     c.input.repeat_rate = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::REPEAT_DELAY => {
                 if let Some(v) = f_u32(&ch) {
                     c.input.repeat_delay = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::NATURAL => {
                 if let Some(v) = f_bool(&ch) {
                     c.input.natural_scroll = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::TAP => {
                 if let Some(v) = f_bool(&ch) {
                     c.input.tap_to_click = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::SENS => {
                 if let Change::Slider(v) = ch {
                     c.input.sensitivity = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::DIM => {
                 if let Some(v) = f_u32(&ch) {
                     c.power.dim_after = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::LOCK => {
                 if let Some(v) = f_u32(&ch) {
                     c.power.lock_after = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::DPMS => {
                 if let Some(v) = f_u32(&ch) {
                     c.power.dpms_after = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::SUSPEND => {
                 if let Some(v) = f_u32(&ch) {
                     c.power.suspend_after = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::LOCK_SLEEP => {
                 if let Some(v) = f_bool(&ch) {
                     c.power.lock_on_sleep = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::FP_LOGIN => {
@@ -1488,56 +1450,56 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
                 if let Some(v) = f_u32(&ch) {
                     c.wm.gaps_in = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::GAPS_OUT => {
                 if let Some(v) = f_u32(&ch) {
                     c.wm.gaps_out = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::BORDER => {
                 if let Some(v) = f_u32(&ch) {
                     c.wm.border = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::ROUNDING => {
                 if let Some(v) = f_u32(&ch) {
                     c.wm.rounding = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::LAYOUT => {
                 if let Some(i) = f_idx(&ch) {
                     c.wm.layout = LAYOUTS[i.min(2)].into();
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::WORKSPACES => {
                 if let Some(v) = f_u32(&ch) {
                     c.wm.workspaces = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::WM_ANIM => {
                 if let Some(v) = f_bool(&ch) {
                     c.wm.animations = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::BLUR => {
                 if let Some(v) = f_bool(&ch) {
                     c.wm.blur = v;
                     save = true;
-                    hypr = true;
+                    comp_settings = true;
                 }
             }
             id::SHELL => {
@@ -1586,11 +1548,11 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         }
     }
     if save {
-        app.commit_config(platform, hypr);
+        app.commit_config(platform, comp_settings);
         if id == id::THEME || id == id::FONT || id == id::FONT_SIZE || id == id::TERM_FONT {
             app.relayout(platform);
         }
-        if hypr && (id::KB_LAYOUT..=id::SENS).contains(&id) {
+        if comp_settings && (id::KB_LAYOUT..=id::SENS).contains(&id) {
             let c = &app.config.input;
             app.system.send(SysRequest::ApplyInput {
                 kb_layout: c.kb_layout.clone(),
@@ -1656,8 +1618,8 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         id::MON_APPLY => {
             let s = &app.scratch;
             if let Some(m) = app.sys.display.monitors.get(s.monitor).cloned() {
-                let mut modes = vec!["preferred".to_string(), "highrr".into(), "highres".into()];
-                modes.extend(m.available_modes.iter().cloned());
+                let mut modes = vec!["preferred".to_string()];
+                modes.extend(m.modes.iter().cloned());
                 let mode = modes
                     .get(s.mon_mode)
                     .cloned()
@@ -1720,7 +1682,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         }
         id::MIXER => {
             let _ =
-                launcher::runner::spawn_detached("pavucontrol || pwvucontrol", app.hypr.is_some());
+                launcher::runner::spawn_detached("pavucontrol || pwvucontrol", app.comp.is_some());
         }
         // Network
         id::WIFI => {
@@ -1840,9 +1802,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             }
         }
         // Security
-        id::LOCK_NOW => {
-            let _ = launcher::runner::spawn_detached("hyprlock", app.hypr.is_some());
-        }
+        id::LOCK_NOW => app.lock_screen(),
         id::FP_FINGER => {
             if let Some(i) = f_idx(&ch) {
                 app.scratch.finger = i;
@@ -1985,7 +1945,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             }
         }
         // WM
-        id::RELOAD => app.export_hypr(),
+        id::RELOAD => app.reload_compositor(),
         _ => {}
     }
 }

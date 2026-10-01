@@ -21,7 +21,7 @@ launcher = { path = "../launcher" }
 settings = { path = "../settings" }
 sysmon = { path = "../sysmon" }
 notifications = { path = "../notifications" }
-hypr = { path = "../hypr" }
+comp = { path = "../comp" }
 ipc = { path = "../ipc" }
 system = { path = "../system" }
 calloop = { workspace = true }
