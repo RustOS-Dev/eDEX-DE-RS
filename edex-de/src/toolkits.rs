@@ -74,9 +74,101 @@ fn qt_roles(t: &Theme, disabled: bool) -> Vec<String> {
     .collect()
 }
 
-/// Files to write, relative to `$XDG_CONFIG_HOME`.
+fn rgb(c: Color) -> String {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("{},{},{}", b(c[0]), b(c[1]), b(c[2]))
+}
+
+/// Name of the KDE colour scheme written to `$XDG_DATA_HOME/color-schemes/`.
+const KDE_SCHEME: &str = "eDEX";
+
+/// The `[Colors:*]` groups of a KDE colour scheme.
+fn kde_colors(t: &Theme) -> String {
+    let view = mix(t.background, BLACK, 0.15);
+    let window = t.panel_bg;
+    let button = mix(t.panel_bg, t.border, 0.12);
+    let header = mix(t.panel_bg, t.border, 0.1);
+    let on_accent = mix(t.background, BLACK, 0.3);
+    let set = |name: &str, bg: Color, alt: Color, fg: Color| {
+        format!(
+            "[Colors:{name}]\nBackgroundNormal={}\nBackgroundAlternate={}\nForegroundNormal={}\nForegroundInactive={}\nForegroundActive={}\nForegroundLink={}\nForegroundVisited={}\nForegroundNegative={}\nForegroundNeutral={}\nForegroundPositive={}\nDecorationFocus={}\nDecorationHover={}\n\n",
+            rgb(bg),
+            rgb(alt),
+            rgb(fg),
+            rgb(t.text_dim),
+            rgb(t.accent),
+            rgb(t.accent),
+            rgb(t.text_secondary),
+            rgb(t.error),
+            rgb(t.warning),
+            rgb(t.palette[2]),
+            rgb(t.accent),
+            rgb(t.border),
+        )
+    };
+    let mut s = String::new();
+    s.push_str(&set(
+        "View",
+        view,
+        mix(view, t.border, 0.08),
+        t.text_primary,
+    ));
+    s.push_str(&set(
+        "Window",
+        window,
+        mix(window, t.border, 0.08),
+        t.text_primary,
+    ));
+    s.push_str(&set(
+        "Button",
+        button,
+        mix(button, WHITE, 0.05),
+        t.text_primary,
+    ));
+    s.push_str(&set(
+        "Selection",
+        t.accent,
+        mix(t.accent, BLACK, 0.2),
+        on_accent,
+    ));
+    s.push_str(&set("Tooltip", t.panel_bg, t.panel_bg, t.text_primary));
+    s.push_str(&set(
+        "Complementary",
+        mix(t.background, BLACK, 0.3),
+        t.background,
+        t.text_primary,
+    ));
+    s.push_str(&set("Header", header, header, t.text_primary));
+    s
+}
+
+/// A KDE colour scheme file. Kirigami apps (Discover) only follow the scheme named in
+/// `[UiSettings] ColorScheme`; without it they fall back to Breeze whatever kdeglobals says.
+fn kde_scheme(t: &Theme) -> String {
+    format!(
+        "# {MARK} from the '{}' theme (remove this line to keep your changes)\n{}[General]\nName={KDE_SCHEME}\nColorScheme={KDE_SCHEME}\n",
+        t.name,
+        kde_colors(t)
+    )
+}
+
+/// kdeglobals: colours for KColorScheme readers, plus the scheme, fonts and icons.
+fn kdeglobals(t: &Theme, font: &str, font_pt: u32) -> String {
+    let mut s = format!(
+        "# {MARK} from the '{}' theme (remove this line to keep your changes)\n{}",
+        t.name,
+        kde_colors(t)
+    );
+    s.push_str(&format!(
+        "[General]\nColorScheme={KDE_SCHEME}\nfont={font},{font_pt},-1,5,400,0,0,0,0,0\nfixed={font},{font_pt},-1,5,400,0,0,0,0,0\n\n[Icons]\nTheme={ICON_THEME}\n\n[KDE]\nwidgetStyle=Fusion\n\n[UiSettings]\nColorScheme={KDE_SCHEME}\n"
+    ));
+    s
+}
+
+/// Files to write: relative paths are under `$XDG_CONFIG_HOME`, absolute ones under `data_dir`.
 pub fn render(
     config_dir: &Path,
+    data_dir: &Path,
     theme: &Theme,
     font: &str,
     font_pt: u32,
@@ -101,6 +193,14 @@ pub fn render(
             qfont(font_pt),
             qfont(font_pt)
         ),
+    ));
+    out.push((
+        PathBuf::from("kdeglobals"),
+        kdeglobals(theme, font, font_pt),
+    ));
+    out.push((
+        data_dir.join(format!("color-schemes/{KDE_SCHEME}.colors")),
+        kde_scheme(theme),
     ));
     let gtk_settings = |theme_line: &str| {
         format!(
@@ -149,10 +249,10 @@ fn writable(path: &Path) -> bool {
     }
 }
 
-/// Write the files under `config_dir` and set the GNOME interface keys.
-pub fn apply(config_dir: &Path, theme: &Theme, font: &str, font_pt: u32) {
+/// Write the files under `config_dir` / `data_dir` and set the GNOME interface keys.
+pub fn apply(config_dir: &Path, data_dir: &Path, theme: &Theme, font: &str, font_pt: u32) {
     let mut written = 0;
-    for (rel, contents) in render(config_dir, theme, font, font_pt) {
+    for (rel, contents) in render(config_dir, data_dir, theme, font, font_pt) {
         let path = config_dir.join(&rel);
         if !writable(&path) {
             continue;
@@ -196,6 +296,7 @@ mod tests {
         let theme = ui::theme::builtin_tron();
         let files = render(
             Path::new("/home/u/.config"),
+            Path::new("/home/u/.local/share"),
             &theme,
             "JetBrainsMono Nerd Font",
             10,
@@ -220,6 +321,12 @@ mod tests {
         assert!(qt.contains("icon_theme=Papirus-Dark"));
         assert!(qt.contains("color_scheme_path=/home/u/.config/qt6ct/colors/edex.conf"));
         assert!(!get("gtk-3.0/gtk.css").contains(":root"));
+        let kde = get("kdeglobals");
+        assert!(kde.contains("[Colors:View]") && kde.contains("[Colors:Selection]"));
+        assert!(kde.contains("[Icons]\nTheme=Papirus-Dark"));
+        assert!(kde.contains("[UiSettings]\nColorScheme=eDEX"));
+        let scheme = get("/home/u/.local/share/color-schemes/eDEX.colors");
+        assert!(scheme.contains("[Colors:Window]") && scheme.contains("Name=eDEX"));
         assert!(get("gtk-3.0/settings.ini").contains("gtk-theme-name=adw-gtk3-dark"));
         assert!(!get("gtk-4.0/settings.ini").contains("gtk-theme-name"));
         assert!(

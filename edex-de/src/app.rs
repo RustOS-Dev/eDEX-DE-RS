@@ -779,14 +779,20 @@ impl App {
             let pt = ((c.appearance.font_size * 0.75).round() as u32).clamp(8, 16);
             let key = (self.state.theme.name.clone(), font.clone(), pt);
             if self.toolkit_key.as_ref() != Some(&key) {
-                let dir = std::env::var_os("XDG_CONFIG_HOME")
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var_os("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(".config"))
-                    });
-                if let Some(dir) = dir {
-                    crate::toolkits::apply(&dir, &self.state.theme, &font, pt);
+                let xdg = |var: &str, fallback: &str| {
+                    std::env::var_os(var)
+                        .filter(|v| !v.is_empty())
+                        .map(std::path::PathBuf::from)
+                        .or_else(|| {
+                            std::env::var_os("HOME")
+                                .map(|h| std::path::PathBuf::from(h).join(fallback))
+                        })
+                };
+                if let (Some(config), Some(data)) = (
+                    xdg("XDG_CONFIG_HOME", ".config"),
+                    xdg("XDG_DATA_HOME", ".local/share"),
+                ) {
+                    crate::toolkits::apply(&config, &data, &self.state.theme, &font, pt);
                 }
                 self.toolkit_key = Some(key);
             }
