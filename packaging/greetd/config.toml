@@ -1,9 +1,0 @@
-# greetd configuration for the eDEX greeter. Install as /etc/greetd/config.toml
-# (eDEX-OS ships it as a drop-in via edex-os-greetd-config).
-[terminal]
-vt = 1
-
-[default_session]
-# cage runs the greeter as a kiosk compositor and fullscreens its single window.
-command = "cage -s -- edex-greeter"
-user = "greeter"

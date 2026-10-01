@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to create and release, e.g. v3.1.0"
+        description: "Tag to create and release, e.g. v4.0.0"
         required: true
 
 permissions:
@@ -30,45 +30,14 @@ jobs:
       - name: Tag matches the crate version
         run: |
           grep -q "^version = \"${TAG#v}\"" Cargo.toml || { echo "::error::$TAG does not match the version in Cargo.toml"; exit 1; }
-      - uses: dtolnay/rust-toolchain@stable
-      - name: System dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config \
-            librsvg2-bin dpkg-dev debhelper rpm fakeroot
-      - uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: |
-          cargo build --release --locked --workspace --bins
-          assets/make-assets.sh assets/generated
-      - name: Tarball
+      - name: Source tarball
+        # RustOS builds eDEX-DE from source in its ports tree (ports/edex-de/build.sh), against the
+        # RustOS musl sysroot; the release publishes the pinned source and its checksum.
         run: |
           V=${TAG#v}
-          mkdir -p dist/edex-de-$V
-          cp target/release/edex-de target/release/edex-greeter packaging/session/edex-session dist/edex-de-$V/
-          cp -r themes share packaging assets/generated dist/edex-de-$V/
-          cp README.md LICENSE CHANGELOG.md dist/edex-de-$V/
-          tar -C dist -czf dist/edex-de-$V-x86_64-linux.tar.gz edex-de-$V
-      - name: Debian package
-        run: |
-          V=${TAG#v}
-          rm -rf build-deb && mkdir build-deb
-          git archive --format=tar --prefix=edex-de-$V/ HEAD | tar -x -C build-deb
-          cp -r packaging/debian build-deb/edex-de-$V/debian
-          cd build-deb/edex-de-$V
-          # Rust comes from rustup, not apt: skip the Build-Depends check; CI already ran the tests.
-          DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -us -uc -b -d
-          cp ../*.deb ../../dist/
-      - name: RPM package
-        run: |
-          V=${TAG#v}
-          mkdir -p ~/rpmbuild/{SOURCES,SPECS}
-          git archive --format=tar.gz --prefix=eDEX-DE-$V/ HEAD > ~/rpmbuild/SOURCES/v$V.tar.gz
-          sed "s/^Version:.*/Version:        $V/" packaging/rpm/edex-de.spec > ~/rpmbuild/SPECS/edex-de.spec
-          rpmbuild -bb --nodeps --nocheck ~/rpmbuild/SPECS/edex-de.spec
-          cp ~/rpmbuild/RPMS/x86_64/*.rpm dist/
-      - name: Checksums
-        run: cd dist && sha256sum *.tar.gz *.deb *.rpm > SHA256SUMS
+          mkdir -p dist
+          git archive --format=tar.gz --prefix=edex-de-$V/ HEAD > dist/edex-de-$V.tar.gz
+          cd dist && sha256sum *.tar.gz > SHA256SUMS
       - name: Release notes
         run: |
           V=${TAG#v}
@@ -82,33 +51,4 @@ jobs:
           prerelease: ${{ contains(env.TAG, '-') }}
           files: |
             dist/*.tar.gz
-            dist/*.deb
-            dist/*.rpm
             dist/SHA256SUMS
-
-  aur:
-    needs: release
-    runs-on: ubuntu-24.04
-    if: ${{ !contains(inputs.tag || github.ref_name, '-') }}
-    # Job-level so the publish step's `if:` can see it (step-level env is not visible there).
-    env:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: PKGBUILD with real checksum
-        run: |
-          V=${TAG#v}
-          curl -sL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/v$V.tar.gz" -o src.tar.gz
-          SUM=$(sha256sum src.tar.gz | cut -d' ' -f1)
-          sed -e "s/^pkgver=.*/pkgver=$V/" -e "s/^sha256sums=.*/sha256sums=('$SUM')/" packaging/aur/PKGBUILD > PKGBUILD
-          cat PKGBUILD
-      - name: Publish to AUR
-        if: ${{ env.AUR_SSH_PRIVATE_KEY != '' }}
-        uses: KSXGitHub/github-actions-deploy-aur@v3
-        with:
-          pkgname: edex-de
-          pkgbuild: ./PKGBUILD
-          commit_username: eDEX-OS
-          commit_email: edex-de@github.com
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ env.TAG }}"
