@@ -175,6 +175,24 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
                 app.mark_canvas_dirty();
                 Response::ok()
             }
+            "side-panels" => {
+                // Off: apps tile over the file and system panels and get the full width.
+                let keep = !app.config.layout.reserve_side_panels;
+                app.config.layout.reserve_side_panels = keep;
+                app.commit_config(platform, false);
+                show_osd(
+                    app,
+                    platform,
+                    if keep {
+                        "SIDE PANELS: SHOWN"
+                    } else {
+                        "SIDE PANELS: HIDDEN"
+                    },
+                    if keep { 1.0 } else { 0.0 },
+                    !keep,
+                );
+                Response::ok()
+            }
             "keyboard" => {
                 app.config.appearance.keyboard_visible = !app.config.appearance.keyboard_visible;
                 app.commit_config(platform, false);

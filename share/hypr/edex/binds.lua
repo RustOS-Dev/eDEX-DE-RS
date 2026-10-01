@@ -25,6 +25,8 @@ hl.bind(mod .. " + B", hl.dsp.exec_cmd("xdg-open https://"))
 hl.bind(mod .. " + Q", hl.dsp.window.close())
 hl.bind(mod .. " + SHIFT + Q", hl.dsp.window.kill())
 hl.bind(mod .. " + F", hl.dsp.window.fullscreen({ action = "toggle", mode = "fullscreen" }))
+-- Hide/show the file and system side panels: apps then use the full width under the top bar.
+hl.bind(mod .. " + SHIFT + F", ipc("action side-panels"))
 hl.bind(mod .. " + M", hl.dsp.window.fullscreen({ action = "toggle", mode = "maximized" }))
 hl.bind(mod .. " + V", hl.dsp.window.float({ action = "toggle" }))
 hl.bind(mod .. " + C", hl.dsp.window.center())

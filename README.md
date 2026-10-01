@@ -99,6 +99,7 @@ Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/us
 | `SUPER+Return` / `SUPER+F1` | Focus the eDEX terminal / file panel |
 | `SUPER+Shift+Return`, `SUPER+E` | kitty, file manager |
 | `SUPER+Q`, `SUPER+F`, `SUPER+V`, `SUPER+M` | Close, fullscreen, float, maximize |
+| `SUPER+SHIFT+F` | Hide / show the side panels (apps use the full width; the top bar stays) |
 | `SUPER+H/J/K/L`, `SUPER+Shift+…`, `SUPER+Ctrl+…` | Focus, move, resize |
 | `SUPER+1..0`, `SUPER+Shift+1..0` | Switch / move to workspace |
 | `SUPER+S` | Scratchpad |
