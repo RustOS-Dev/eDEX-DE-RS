@@ -16,7 +16,6 @@ pub const HIT_SESSION_PREV: u32 = 1;
 pub const HIT_SESSION_NEXT: u32 = 2;
 pub const HIT_INPUT: u32 = 3;
 pub const HIT_SUBMIT: u32 = 4;
-pub const HIT_SUSPEND: u32 = 10;
 pub const HIT_REBOOT: u32 = 11;
 pub const HIT_POWEROFF: u32 = 12;
 
@@ -252,7 +251,9 @@ pub fn render(g: &Greeter, width: f32, height: f32) -> Rendered {
     // Submit.
     ctx.button(
         Rect::new(inner.x, y, inner.w, line * 1.7),
-        if g.phase == Phase::Prompt {
+        if g.lock {
+            "UNLOCK"
+        } else if g.phase == Phase::Prompt {
             "LOG IN"
         } else {
             "CONTINUE"
@@ -264,13 +265,9 @@ pub fn render(g: &Greeter, width: f32, height: f32) -> Rendered {
 
     // Power buttons.
     if g.cfg.power_buttons {
-        let labels = [
-            ("SUSPEND  F2", HIT_SUSPEND),
-            ("REBOOT  F3", HIT_REBOOT),
-            ("POWER OFF  F4", HIT_POWEROFF),
-        ];
+        let labels = [("REBOOT  F3", HIT_REBOOT), ("POWER OFF  F4", HIT_POWEROFF)];
         let w = 150.0;
-        let mut x = width - 24.0 - w * 3.0 - 16.0;
+        let mut x = width - 24.0 - w * labels.len() as f32 - 8.0;
         for (label, id) in labels {
             let r = Rect::new(x, height - 24.0 - line * 1.6, w, line * 1.6);
             ctx.button(r, label, HitTarget::OverlayItem(id), false, true);
@@ -279,10 +276,17 @@ pub fn render(g: &Greeter, width: f32, height: f32) -> Rendered {
     }
     ctx.label_small(
         Rect::new(24.0, height - 24.0 - line * 1.6, width * 0.5, line * 1.6),
-        &format!(
-            "edex-greeter {}  ·  ↑↓ user  ·  Tab session  ·  Enter log in",
-            env!("CARGO_PKG_VERSION")
-        ),
+        &if g.lock {
+            format!(
+                "edex-greeter {}  ·  locked  ·  Enter unlock",
+                env!("CARGO_PKG_VERSION")
+            )
+        } else {
+            format!(
+                "edex-greeter {}  ·  ↑↓ user  ·  Tab session  ·  Enter log in",
+                env!("CARGO_PKG_VERSION")
+            )
+        },
         theme.text_dim,
     );
 

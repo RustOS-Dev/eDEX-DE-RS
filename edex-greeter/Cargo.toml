@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE greetd greeter"
+description = "eDEX-DE login and lock screen (talks to edex-comp)"
 
 [[bin]]
 name = "edex-greeter"
@@ -15,8 +15,7 @@ path = "src/main.rs"
 platform = { path = "../platform" }
 renderer = { path = "../renderer" }
 ui = { path = "../ui" }
-system = { path = "../system" }
-greetd_ipc = { workspace = true }
+comp-proto = { path = "../comp-proto" }
 serde = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true }

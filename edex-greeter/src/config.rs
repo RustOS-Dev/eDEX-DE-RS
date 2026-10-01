@@ -35,7 +35,8 @@ impl Default for GreeterConfig {
             power_buttons: true,
             font_size: 15.0,
             min_uid: 1000,
-            state_file: PathBuf::from("/var/cache/edex-greeter/state.toml"),
+            // RustOS's root is a tmpfs; /storage persists across boots.
+            state_file: PathBuf::from("/storage/etc/edex-greeter/state.toml"),
         }
     }
 }

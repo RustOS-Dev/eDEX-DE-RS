@@ -5,5 +5,6 @@ default_session = "edex-de"
 show_users = true
 power_buttons = true
 font_size = 15.0
+# root (uid 0) is always listed; regular accounts start here.
 min_uid = 1000
-state_file = "/var/cache/edex-greeter/state.toml"
+state_file = "/storage/etc/edex-greeter/state.toml"

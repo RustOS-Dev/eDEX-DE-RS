@@ -1,0 +1,20 @@
+[package]
+name = "edex-auth"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Password checks and account edits for eDEX-DE on RustOS (no PAM): greeter, lock screen, Users panel"
+
+[[bin]]
+name = "edex-auth"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+libc = { workspace = true }
+sha-crypt = "0.6"
+
+[dev-dependencies]
+tempfile = { workspace = true }

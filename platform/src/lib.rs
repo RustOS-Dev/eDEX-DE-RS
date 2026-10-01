@@ -41,6 +41,10 @@ use smithay_client_toolkit::{
         },
         Capability, SeatHandler, SeatState,
     },
+    session_lock::{
+        SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface,
+        SessionLockSurfaceConfigure,
+    },
     shell::{
         wlr_layer::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
@@ -234,6 +238,8 @@ pub struct Platform<E: 'static> {
     viewporter: Option<WpViewporter>,
     fractional_manager: Option<WpFractionalScaleManagerV1>,
     data_device_manager: Option<DataDeviceManagerState>,
+    session_lock_state: SessionLockState,
+    session_lock: Option<SessionLock>,
     surfaces: HashMap<SurfaceId, SurfaceEntry>,
     by_wl: HashMap<wayland_client::backend::ObjectId, SurfaceId>,
     next_surface: u64,
@@ -274,6 +280,7 @@ impl<E: 'static> Platform<E> {
         let fractional_manager =
             bind_optional::<WpFractionalScaleManagerV1, Self>(&globals, &qh, 1..=1);
         let data_device_manager = DataDeviceManagerState::bind(&globals, &qh).ok();
+        let session_lock_state = SessionLockState::new(&globals, &qh);
 
         let (internal_tx, internal_rx) = channel::channel::<Internal>();
         loop_handle
@@ -310,6 +317,8 @@ impl<E: 'static> Platform<E> {
             viewporter,
             fractional_manager,
             data_device_manager,
+            session_lock_state,
+            session_lock: None,
             surfaces: HashMap::new(),
             by_wl: HashMap::new(),
             next_surface: 1,
@@ -557,6 +566,69 @@ impl<E: 'static> Platform<E> {
             },
         );
         Ok(id)
+    }
+
+    /// Lock the session (ext-session-lock) and cover every output with a lock surface. The
+    /// surfaces arrive as `Configure` events like any other; a refused lock closes them.
+    pub fn lock_session(&mut self) -> Result<Vec<SurfaceId>> {
+        let lock = self
+            .session_lock_state
+            .lock(&self.qh)
+            .map_err(|e| anyhow!("the compositor cannot lock the session: {e}"))?;
+        let outputs: Vec<(OutputId, wl_output::WlOutput)> = self
+            .outputs
+            .iter()
+            .map(|(id, o)| (*id, o.clone()))
+            .collect();
+        let mut ids = Vec::new();
+        for (output_id, output) in outputs {
+            let id = self.alloc_id();
+            let wl_surface = self.compositor.create_surface(&self.qh);
+            let (viewport, fractional) = self.attach_scale_helpers(id, &wl_surface);
+            let surface = lock.create_lock_surface(wl_surface.clone(), &output, &self.qh);
+            self.by_wl.insert(wl_surface.id(), id);
+            self.surfaces.insert(
+                id,
+                SurfaceEntry {
+                    wl_surface,
+                    kind: SurfaceKind::Lock(surface),
+                    role: SurfaceRole::Lock,
+                    output: Some(output_id),
+                    viewport,
+                    fractional,
+                    scale120: None,
+                    int_scale: 1,
+                    logical_size: (1280, 720),
+                    configured: false,
+                    frame_pending: false,
+                    reserver_buffer: None,
+                },
+            );
+            ids.push(id);
+        }
+        self.session_lock = Some(lock);
+        Ok(ids)
+    }
+
+    /// Unlock the session (after the password was checked) and drop the lock surfaces.
+    pub fn unlock_session(&mut self) {
+        if let Some(lock) = self.session_lock.take() {
+            lock.unlock();
+        }
+        let ids: Vec<SurfaceId> = self
+            .surfaces
+            .iter()
+            .filter(|(_, e)| e.role == SurfaceRole::Lock)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            self.destroy_surface(id);
+        }
+        let _ = self.conn.flush();
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.session_lock.as_ref().is_some_and(|l| l.is_locked())
     }
 
     pub fn destroy_surface(&mut self, id: SurfaceId) {
@@ -1535,6 +1607,56 @@ impl<E: 'static> DataSourceHandler for Platform<E> {
     fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
     fn dnd_finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
     fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
+}
+
+impl<E: 'static> SessionLockHandler for Platform<E> {
+    fn locked(&mut self, _: &Connection, _: &QueueHandle<Self>, _: SessionLock) {
+        info!("session locked");
+    }
+
+    fn finished(&mut self, _: &Connection, _: &QueueHandle<Self>, _: SessionLock) {
+        // The compositor refused the lock (another client holds it) or ended it.
+        warn!("session lock finished by the compositor");
+        let ids: Vec<SurfaceId> = self
+            .surfaces
+            .iter()
+            .filter(|(_, e)| e.role == SurfaceRole::Lock)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            self.events.push_back(PlatformEvent::Closed { surface: id });
+        }
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: SessionLockSurface,
+        configure: SessionLockSurfaceConfigure,
+        _: u32,
+    ) {
+        let Some(id) = self.surface_id(surface.wl_surface()) else {
+            return;
+        };
+        {
+            let entry = self.surfaces.get_mut(&id).expect("surface exists");
+            let (w, h) = configure.new_size;
+            entry.logical_size = (w.max(1), h.max(1));
+            entry.configured = true;
+            if let Some(viewport) = &entry.viewport {
+                viewport.set_destination(w.max(1) as i32, h.max(1) as i32);
+            }
+        }
+        let (width, height) = self.surfaces[&id].logical_size;
+        let scale = self.scale(id);
+        self.events.push_back(PlatformEvent::Configure {
+            surface: id,
+            width,
+            height,
+            scale,
+        });
+    }
 }
 
 delegate_registry!(@<E: 'static> Platform<E>);

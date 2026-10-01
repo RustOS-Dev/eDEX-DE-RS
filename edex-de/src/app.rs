@@ -773,7 +773,7 @@ impl App {
                 self.state.terminal.active = self.terminal.active_index();
                 Some(render_strip(&self.state, wf, hf))
             }
-            SurfaceRole::Reserver(_) | SurfaceRole::Window => None,
+            SurfaceRole::Reserver(_) | SurfaceRole::Window | SurfaceRole::Lock => None,
         };
         let Some(rendered) = rendered else {
             self.dirty.remove(&id);

@@ -1,6 +1,4 @@
-//! Login users from /etc/passwd.
-
-use std::path::Path;
+//! Login users from the RustOS account file (`/storage/etc/passwd`, else `/etc/passwd`).
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct User {
@@ -19,7 +17,8 @@ pub fn parse_passwd(text: &str, min_uid: u32) -> Vec<User> {
             }
             let uid: u32 = f[2].parse().ok()?;
             let shell = f[6].trim();
-            if uid < min_uid
+            // root is the RustOS console account and can log in to the desktop.
+            if (uid != 0 && uid < min_uid)
                 || uid >= 60000
                 || shell.ends_with("nologin")
                 || shell.ends_with("/false")
@@ -43,8 +42,10 @@ pub fn parse_passwd(text: &str, min_uid: u32) -> Vec<User> {
     users
 }
 
-pub fn load(path: &Path, min_uid: u32) -> Vec<User> {
-    std::fs::read_to_string(path)
+pub fn load(min_uid: u32) -> Vec<User> {
+    ["/storage/etc/passwd", "/etc/passwd"]
+        .iter()
+        .find_map(|p| std::fs::read_to_string(p).ok())
         .map(|t| parse_passwd(&t, min_uid))
         .unwrap_or_default()
 }
@@ -61,8 +62,9 @@ mod tests {
                       liveuser:x:1001:1001::/home/liveuser:/bin/bash\n\
                       nobody:x:65534:65534::/:/usr/bin/nologin\n";
         let u = parse_passwd(passwd, 1000);
-        assert_eq!(u.len(), 2);
-        assert_eq!(u[0].real_name, "Ari Cummings");
-        assert_eq!(u[1].real_name, "liveuser");
+        assert_eq!(u.len(), 3);
+        assert_eq!(u[0].name, "root");
+        assert_eq!(u[1].real_name, "Ari Cummings");
+        assert_eq!(u[2].real_name, "liveuser");
     }
 }

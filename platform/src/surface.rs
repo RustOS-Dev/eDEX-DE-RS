@@ -1,6 +1,7 @@
 //! Surface bookkeeping shared by canvases, reservers, overlays, toasts and xdg windows.
 
 use smithay_client_toolkit::{
+    session_lock::SessionLockSurface,
     shell::{wlr_layer::LayerSurface, xdg::window::Window},
     shm::slot::Buffer,
 };
@@ -35,14 +36,18 @@ pub enum SurfaceRole {
     /// Top-layer bar over the centre panel's tab strip. Hyprland stops sending pointer input to
     /// background layers while a window is maximized, so the window controls live up here.
     Strip,
-    /// xdg-toplevel window (used by the greeter under cage).
+    /// xdg-toplevel window (the greeter on the login screen).
     Window,
+    /// ext-session-lock surface covering one output (the lock screen).
+    Lock,
 }
 
 pub(crate) enum SurfaceKind {
     Layer(LayerSurface),
     #[allow(dead_code)]
     Window(Window),
+    #[allow(dead_code)]
+    Lock(SessionLockSurface),
 }
 
 pub(crate) struct SurfaceEntry {

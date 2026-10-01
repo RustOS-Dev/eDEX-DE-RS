@@ -1,7 +1,8 @@
-//! eDEX greeter for greetd. Runs as a fullscreen window under `cage`.
+//! eDEX greeter for RustOS. On the login screen it is a fullscreen window of edex-comp running
+//! in greeter mode; with `--lock` it is the session's lock screen (ext-session-lock). Either way
+//! the password goes to edex-comp, which checks it with edex-auth.
 
 mod config;
-mod greetd;
 mod screen;
 mod sessions;
 mod users;
@@ -18,8 +19,8 @@ use calloop::{
     EventLoop,
 };
 use clap::Parser;
+use comp_proto::Request;
 use config::{GreeterConfig, State};
-use greetd::{Greetd, Step};
 use platform::{button, KeyInput, Platform, PlatformEvent, SurfaceId};
 use renderer::{GpuContext, SurfaceRenderer};
 use sessions::Session;
@@ -28,12 +29,15 @@ use users::User;
 use xkbcommon::xkb::keysyms as ks;
 
 #[derive(Parser, Debug)]
-#[command(name = "edex-greeter", version, about = "eDEX greeter for greetd")]
+#[command(name = "edex-greeter", version, about = "eDEX login and lock screen")]
 struct Cli {
     /// Configuration file.
     #[arg(long, default_value = config::DEFAULT_PATH)]
     config: PathBuf,
-    /// Run without greetd (renders the UI; Enter prints the session command).
+    /// Be the lock screen of the running session.
+    #[arg(long)]
+    lock: bool,
+    /// Run without edex-comp (renders the UI; any password is accepted).
     #[arg(long)]
     demo: bool,
     /// Exit after N seconds with a JSON report (CI).
@@ -50,7 +54,8 @@ pub enum Phase {
 }
 
 pub enum Event {
-    Greetd(Box<(Greetd, Result<Step>)>),
+    /// edex-comp's answer to a login (or unlock) request.
+    Login(std::result::Result<(), String>),
     Tick,
 }
 
@@ -73,8 +78,11 @@ pub struct Greeter {
     pub clock: String,
     pub date: String,
     started: Instant,
-    greetd: Option<Greetd>,
     demo: bool,
+    /// Lock screen of a running session rather than the login screen.
+    pub lock: bool,
+    /// Set when a lock-screen password was accepted: unlock and exit.
+    unlocked: bool,
     tx: channel::Sender<Event>,
     quit: bool,
     exit_code: i32,
@@ -106,113 +114,67 @@ impl Greeter {
         self.message = Some((msg.into(), error));
     }
 
-    /// Run a greetd call on a worker thread; the result comes back as `Event::Greetd`.
-    fn call(&mut self, f: impl FnOnce(&mut Greetd) -> Result<Step> + Send + 'static) {
-        let Some(mut g) = self.greetd.take() else {
-            if self.demo {
-                self.demo_step();
-            }
+    /// Ask edex-comp to check the password on a worker thread; the answer comes back as
+    /// `Event::Login`.
+    fn login(&mut self) {
+        let user = self.current_user();
+        let password = std::mem::take(&mut self.input);
+        if self.demo {
+            self.set_message(format!("demo: would log in {user}"), false);
+            self.phase = Phase::Prompt;
             return;
-        };
+        }
+        let session = self.sessions.get(self.session_idx).map(|s| s.id.clone());
         self.phase = Phase::Busy;
+        self.message = None;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let res = f(&mut g);
-            let _ = tx.send(Event::Greetd(Box::new((g, res))));
+            let res = comp_proto::call(&Request::Login {
+                user,
+                password,
+                session,
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+            let _ = tx.send(Event::Login(res));
         });
-    }
-
-    fn demo_step(&mut self) {
-        match self.phase {
-            Phase::PickUser => {
-                self.phase = Phase::Prompt;
-                self.prompt = "Password:".into();
-                self.secret = true;
-                self.input.clear();
-                self.set_message("demo mode: any password is accepted", false);
-            }
-            Phase::Prompt => {
-                let cmd = self.session_command();
-                println!("{}", cmd.join(" "));
-                self.set_message(format!("demo: would start `{}`", cmd.join(" ")), false);
-                self.phase = Phase::PickUser;
-                self.input.clear();
-            }
-            _ => {}
-        }
-    }
-
-    fn session_command(&self) -> Vec<String> {
-        self.sessions
-            .get(self.session_idx)
-            .map(|s| s.exec.clone())
-            .unwrap_or_else(|| vec![self.cfg.fallback_command.clone()])
-    }
-
-    fn session_env(&self) -> Vec<String> {
-        let id = self
-            .sessions
-            .get(self.session_idx)
-            .map(|s| s.id.clone())
-            .unwrap_or_else(|| "edex-de".into());
-        let x11 = self.sessions.get(self.session_idx).is_some_and(|s| s.x11);
-        let mut env = vec![
-            format!("XDG_SESSION_TYPE={}", if x11 { "x11" } else { "wayland" }),
-            format!("XDG_SESSION_DESKTOP={id}"),
-        ];
-        if id == "edex-de" {
-            env.push("XDG_CURRENT_DESKTOP=eDEX-DE:Hyprland".into());
-        }
-        env
     }
 
     fn submit(&mut self) {
         match self.phase {
             Phase::PickUser => {
-                let user = self.current_user();
-                if user.is_empty() {
+                if self.current_user().is_empty() {
                     self.set_message("enter a user name", true);
                     return;
                 }
                 self.message = None;
-                self.call(move |g| g.create_session(&user));
+                self.phase = Phase::Prompt;
+                self.prompt = "Password:".into();
+                self.secret = true;
+                self.input.clear();
             }
-            Phase::Prompt => {
-                let answer = std::mem::take(&mut self.input);
-                self.call(move |g| g.respond(Some(answer)));
-            }
+            Phase::Prompt => self.login(),
             _ => {}
         }
     }
 
     fn cancel(&mut self) {
         self.input.clear();
-        self.phase = Phase::PickUser;
         self.message = None;
-        self.call(|g| {
-            g.cancel()?;
-            Ok(Step::Failed("cancelled".into()))
-        });
+        if !self.lock {
+            self.phase = Phase::PickUser;
+        }
     }
 
-    fn handle_step(&mut self, step: Result<Step>) {
-        match step {
-            Ok(Step::Prompt { message, secret }) => {
-                self.phase = Phase::Prompt;
-                self.prompt = message;
-                self.secret = secret;
-                self.input.clear();
+    fn on_login(&mut self, res: std::result::Result<(), String>) {
+        match res {
+            Ok(()) if self.lock => {
+                info!("password accepted; unlocking");
+                self.unlocked = true;
             }
-            Ok(Step::Info { message, error }) => {
-                self.set_message(message, error);
-                // Info messages need an empty answer to continue the conversation.
-                self.call(|g| g.respond(None));
-            }
-            Ok(Step::Success) => {
+            Ok(()) => {
                 self.phase = Phase::Starting;
                 self.set_message("starting session…", false);
-                let cmd = self.session_command();
-                let env = self.session_env();
                 let state = State {
                     last_user: self.current_user(),
                     last_session: self
@@ -222,49 +184,23 @@ impl Greeter {
                         .unwrap_or_default(),
                 };
                 config::save_state(&self.cfg.state_file, &state);
-                info!(cmd = ?cmd, "starting session");
-                self.call(move |g| {
-                    g.start_session(cmd, env)?;
-                    Ok(Step::Success)
-                });
-                // The second Success (from start_session) ends the greeter.
-                self.exit_code = 0;
+                // edex-comp now starts the session and ends this greeter.
             }
-            Ok(Step::Failed(msg)) => {
-                if msg != "cancelled" {
-                    self.set_message(msg, true);
-                }
-                self.phase = Phase::PickUser;
+            Err(msg) => {
+                self.set_message(msg, true);
+                self.phase = Phase::Prompt;
                 self.input.clear();
             }
-            Err(e) => {
-                error!("greetd: {e:#}");
-                self.set_message(format!("greetd error: {e}"), true);
-                self.phase = Phase::PickUser;
-            }
         }
     }
 
-    fn on_greetd(&mut self, g: Greetd, step: Result<Step>) {
-        self.greetd = Some(g);
-        if self.phase == Phase::Starting {
-            match step {
-                Ok(_) => {
-                    info!("session started; exiting greeter");
-                    self.quit = true;
-                }
-                Err(e) => {
-                    self.set_message(format!("cannot start session: {e}"), true);
-                    self.phase = Phase::PickUser;
-                }
-            }
+    /// Reboot or power off from the login screen (edex-comp runs them; there is no suspend
+    /// on RustOS).
+    fn power(&mut self, request: Request) {
+        if self.lock || self.demo {
             return;
         }
-        self.handle_step(step);
-    }
-
-    fn power(&mut self, action: system::LogindAction) {
-        if let Err(e) = system::power::logind(action) {
+        if let Err(e) = comp_proto::call(&request) {
             warn!("power action failed: {e:#}");
             self.set_message(format!("power action failed: {e}"), true);
         }
@@ -300,9 +236,8 @@ impl Greeter {
                     (self.session_idx + 1) % n
                 };
             }
-            ks::KEY_F2 if self.cfg.power_buttons => self.power(system::LogindAction::Suspend),
-            ks::KEY_F3 if self.cfg.power_buttons => self.power(system::LogindAction::Reboot),
-            ks::KEY_F4 if self.cfg.power_buttons => self.power(system::LogindAction::PowerOff),
+            ks::KEY_F3 if self.cfg.power_buttons => self.power(Request::Reboot),
+            ks::KEY_F4 if self.cfg.power_buttons => self.power(Request::PowerOff),
             ks::KEY_BackSpace => {
                 let target = self.active_input();
                 if key.modifiers.ctrl {
@@ -344,9 +279,8 @@ impl Greeter {
                 let n = self.sessions.len().max(1);
                 self.session_idx = (self.session_idx + 1) % n;
             }
-            screen::HIT_SUSPEND => self.power(system::LogindAction::Suspend),
-            screen::HIT_REBOOT => self.power(system::LogindAction::Reboot),
-            screen::HIT_POWEROFF => self.power(system::LogindAction::PowerOff),
+            screen::HIT_REBOOT => self.power(Request::Reboot),
+            screen::HIT_POWEROFF => self.power(Request::PowerOff),
             i if i >= screen::HIT_USER => {
                 let idx = (i - screen::HIT_USER) as usize;
                 if idx < self.users.len() && self.phase == Phase::PickUser {
@@ -382,7 +316,12 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<i32> {
-    let cfg = config::load(&cli.config);
+    let mut cfg = config::load(&cli.config);
+    if cli.lock {
+        // The lock screen belongs to one user and cannot power the machine off.
+        cfg.show_users = false;
+        cfg.power_buttons = false;
+    }
     let share = settings_share_dir();
     let themes = ::ui::theme::load_themes(&[share.join("themes").as_path()]);
     let theme = themes
@@ -415,8 +354,8 @@ fn run(cli: Cli) -> Result<i32> {
         .map_err(|e| anyhow::anyhow!("insert timer: {e}"))?;
 
     let state = config::load_state(&cfg.state_file);
-    let users = users::load(std::path::Path::new("/etc/passwd"), cfg.min_uid);
-    let sessions = sessions::scan(&sessions::default_dirs());
+    let users = users::load(cfg.min_uid);
+    let sessions = sessions::edex_sessions();
     let user_idx = users
         .iter()
         .position(|u| u.name == state.last_user)
@@ -426,18 +365,11 @@ fn run(cli: Cli) -> Result<i32> {
         .position(|s| s.id == state.last_session)
         .or_else(|| sessions.iter().position(|s| s.id == cfg.default_session))
         .unwrap_or(0);
-    let greetd = if cli.demo {
-        None
-    } else {
-        match Greetd::from_env() {
-            Ok(g) => Some(g),
-            Err(e) => {
-                warn!("{e:#}; falling back to demo mode");
-                None
-            }
-        }
-    };
-    let demo = greetd.is_none();
+    let demo = cli.demo || comp_proto::socket_path().is_none_or(|p| !p.exists());
+    if demo && !cli.demo {
+        warn!("edex-comp is not running; demo mode");
+    }
+    let lock_user = std::env::var("USER").unwrap_or_else(|_| state.last_user.clone());
     let mut g = Greeter {
         cfg,
         theme,
@@ -446,35 +378,54 @@ fn run(cli: Cli) -> Result<i32> {
         sessions,
         user_idx,
         session_idx,
-        username_input: state.last_user.clone(),
+        username_input: if cli.lock {
+            lock_user.clone()
+        } else {
+            state.last_user.clone()
+        },
         input: String::new(),
         secret: true,
-        prompt: String::new(),
+        prompt: if cli.lock {
+            format!("Password for {lock_user}:")
+        } else {
+            String::new()
+        },
         message: if demo {
-            Some(("demo mode (no greetd socket)".into(), false))
+            Some(("demo mode (edex-comp is not running)".into(), false))
         } else {
             None
         },
-        phase: Phase::PickUser,
+        phase: if cli.lock {
+            Phase::Prompt
+        } else {
+            Phase::PickUser
+        },
         caps_lock: false,
-        hostname: std::fs::read_to_string("/etc/hostname")
+        hostname: std::fs::read_to_string("/storage/etc/hostname")
+            .or_else(|_| std::fs::read_to_string("/etc/hostname"))
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|_| "edex".into()),
         clock: String::new(),
         date: String::new(),
         started: Instant::now(),
-        greetd,
         demo,
+        lock: cli.lock,
+        unlocked: false,
         tx,
         quit: false,
         exit_code: 0,
     };
     g.tick_clock();
 
-    let window: SurfaceId = platform
-        .create_window("eDEX login", "edex-greeter", true)
-        .context("creating the greeter window")?;
-    let mut renderer: Option<SurfaceRenderer> = None;
+    let surfaces: Vec<SurfaceId> = if cli.lock {
+        platform.lock_session().context("locking the session")?
+    } else {
+        vec![platform
+            .create_window("eDEX login", "edex-greeter", true)
+            .context("creating the greeter window")?]
+    };
+    let mut renderers: std::collections::HashMap<SurfaceId, SurfaceRenderer> =
+        std::collections::HashMap::new();
     let mut hits = ::ui::HitMap::default();
     let mut dirty = true;
     let mut frames: u64 = 0;
@@ -490,25 +441,22 @@ fn run(cli: Cli) -> Result<i32> {
                     width,
                     height,
                     scale,
-                } if surface == window => {
+                } if surfaces.contains(&surface) => {
                     let (bw, bh) = platform.buffer_size(surface).unwrap_or((width, height));
-                    match renderer.as_mut() {
+                    match renderers.get_mut(&surface) {
                         Some(r) => r.resize(&gpu, bw, bh, scale as f32),
                         None => {
                             let handles = platform.raw_handles(surface)?;
-                            renderer = Some(SurfaceRenderer::new(
-                                &mut gpu,
-                                handles,
-                                bw,
-                                bh,
-                                scale as f32,
-                            )?);
+                            renderers.insert(
+                                surface,
+                                SurfaceRenderer::new(&mut gpu, handles, bw, bh, scale as f32)?,
+                            );
                         }
                     }
                     dirty = true;
                 }
-                PlatformEvent::ScaleChanged { surface, scale } if surface == window => {
-                    if let Some(r) = renderer.as_mut() {
+                PlatformEvent::ScaleChanged { surface, scale } if surfaces.contains(&surface) => {
+                    if let Some(r) = renderers.get_mut(&surface) {
                         let (bw, bh) = platform.buffer_size(surface).unwrap_or(r.size());
                         r.resize(&gpu, bw, bh, scale as f32);
                     }
@@ -540,9 +488,12 @@ fn run(cli: Cli) -> Result<i32> {
                     }
                 }
                 PlatformEvent::Closed { .. } => g.quit = true,
-                PlatformEvent::App(Event::Greetd(boxed)) => {
-                    let (gd, step) = *boxed;
-                    g.on_greetd(gd, step);
+                PlatformEvent::App(Event::Login(res)) => {
+                    g.on_login(res);
+                    if g.unlocked {
+                        platform.unlock_session();
+                        g.quit = true;
+                    }
                     dirty = true;
                 }
                 PlatformEvent::App(Event::Tick) => {
@@ -558,23 +509,36 @@ fn run(cli: Cli) -> Result<i32> {
             }
         }
         let _ = pointer;
-        if dirty && platform.is_configured(window) && !platform.frame_pending(window) {
-            if let (Some(r), Some((w, h))) = (renderer.as_mut(), platform.logical_size(window)) {
+        if dirty {
+            let mut drawn = 0;
+            for (i, surface) in surfaces.iter().enumerate() {
+                if !platform.is_configured(*surface) || platform.frame_pending(*surface) {
+                    continue;
+                }
+                let (Some(r), Some((w, h))) =
+                    (renderers.get_mut(surface), platform.logical_size(*surface))
+                else {
+                    continue;
+                };
                 let rendered = screen::render(&g, w as f32, h as f32);
-                hits = rendered.hits;
-                if platform.request_frame(window) {
+                // Clicks are resolved against the first surface's layout.
+                if i == 0 {
+                    hits = rendered.hits;
+                }
+                if platform.request_frame(*surface) {
                     match r.render(&mut gpu, &rendered.scene) {
-                        Ok(true) => {
-                            frames += 1;
-                            dirty = false;
-                        }
-                        Ok(false) => platform.commit(window),
+                        Ok(true) => drawn += 1,
+                        Ok(false) => platform.commit(*surface),
                         Err(e) => {
                             error!("render: {e:#}");
-                            platform.commit(window);
+                            platform.commit(*surface);
                         }
                     }
                 }
+            }
+            if drawn > 0 {
+                frames += 1;
+                dirty = false;
             }
         }
     }

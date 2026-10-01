@@ -1,4 +1,5 @@
-//! Session entries from /usr/share/wayland-sessions (and xsessions, marked as X11).
+//! Sessions edex-comp can start. On RustOS that is the eDEX desktop; session files in
+//! /usr/share/wayland-sessions that name edex-de are listed too (e.g. a safe-mode variant).
 
 use std::path::PathBuf;
 
@@ -84,6 +85,23 @@ pub fn default_dirs() -> Vec<(PathBuf, bool)> {
         (PathBuf::from("/usr/local/share/wayland-sessions"), false),
         (PathBuf::from("/usr/share/xsessions"), true),
     ]
+}
+
+/// The sessions offered on the login screen: eDEX-DE first, then other session files whose
+/// command is an eDEX session.
+pub fn edex_sessions() -> Vec<Session> {
+    let mut out = vec![Session {
+        id: "edex-de".into(),
+        name: "eDEX-DE".into(),
+        exec: vec!["edex-de".into(), "run".into()],
+        x11: false,
+    }];
+    for s in scan(&default_dirs()) {
+        if s.id != "edex-de" && s.exec.first().is_some_and(|c| c.starts_with("edex")) {
+            out.push(s);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
