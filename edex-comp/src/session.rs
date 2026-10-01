@@ -369,6 +369,24 @@ impl Supervisor {
         }
     }
 
+    /// Stop a service and start it again right away.
+    pub fn restart(&mut self, name: &str) -> Result<(), String> {
+        let s = self
+            .services
+            .iter_mut()
+            .find(|s| s.spec.name == name)
+            .ok_or_else(|| format!("no session program named {name}"))?;
+        if let Some(mut child) = s.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        s.gave_up = false;
+        s.failures.clear();
+        s.next_start = None;
+        start(s, &self.user, &self.env);
+        Ok(())
+    }
+
     /// Ask the session's programs to quit (SIGTERM), then forget them.
     pub fn shutdown(&mut self) {
         for s in &mut self.services {

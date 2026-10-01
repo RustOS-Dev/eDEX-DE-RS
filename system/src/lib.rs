@@ -61,7 +61,6 @@ pub enum SysRequest {
     PowerQuery,
     SetPowerProfile(String),
     Logind(LogindAction),
-    SetLidAction(String),
     UsersQuery,
     SetRealName {
         user: String,
@@ -276,72 +275,72 @@ fn handle(
             done("audio", audio::set_default(r, id)),
             SysReply::Audio(audio::query(r)),
         ],
-        Q::BrightnessQuery => vec![SysReply::Brightness(brightness::query(r))],
-        Q::BrightnessAdjust(d) => match brightness::adjust(r, d) {
+        Q::BrightnessQuery => vec![SysReply::Brightness(brightness::query())],
+        Q::BrightnessAdjust(d) => match brightness::adjust(d) {
             Ok(s) => vec![SysReply::Brightness(s)],
             Err(e) => vec![done("brightness", Err(e))],
         },
-        Q::BrightnessSet(p) => match brightness::set(r, p) {
+        Q::BrightnessSet(p) => match brightness::set(p) {
             Ok(s) => vec![SysReply::Brightness(s)],
             Err(e) => vec![done("brightness", Err(e))],
         },
-        Q::NetworkQuery { rescan } => vec![SysReply::Network(network::query(r, rescan))],
+        Q::NetworkQuery { rescan } => vec![SysReply::Network(network::query(rescan))],
         Q::WifiConnect { ssid, password } => vec![
-            done("wifi", network::wifi_connect(r, &ssid, password.as_deref())),
-            SysReply::Network(network::query(r, false)),
+            done("wifi", network::wifi_connect(&ssid, password.as_deref())),
+            SysReply::Network(network::query(false)),
         ],
         Q::ConnectionUp(n) => vec![
-            done("connection", network::connection_up(r, &n)),
-            SysReply::Network(network::query(r, false)),
+            done("connection", network::connection_up(&n)),
+            SysReply::Network(network::query(false)),
         ],
         Q::ConnectionDown(n) => vec![
-            done("connection", network::connection_down(r, &n)),
-            SysReply::Network(network::query(r, false)),
+            done("connection", network::connection_down(&n)),
+            SysReply::Network(network::query(false)),
         ],
         Q::ConnectionDelete(n) => vec![
-            done("connection", network::connection_delete(r, &n)),
-            SysReply::Network(network::query(r, false)),
+            done("connection", network::connection_delete(&n)),
+            SysReply::Network(network::query(false)),
         ],
         Q::WifiRadio(on) => vec![
-            done("wifi", network::wifi_radio(r, on)),
-            SysReply::Network(network::query(r, false)),
+            done("wifi", network::wifi_radio(on)),
+            SysReply::Network(network::query(false)),
         ],
         Q::Airplane(on) => vec![
-            done("airplane", network::airplane(r, on)),
-            SysReply::Network(network::query(r, false)),
+            done("airplane", network::airplane(on)),
+            SysReply::Network(network::query(false)),
         ],
         Q::WireguardCreate(spec) => vec![
-            done("wireguard", network::wireguard_create(r, &spec).map(|_| ())),
-            SysReply::Network(network::query(r, false)),
+            done("wireguard", network::wireguard_create(&spec).map(|_| ())),
+            SysReply::Network(network::query(false)),
         ],
         Q::VpnImport(path) => vec![
-            done("vpn-import", network::vpn_import(r, &path).map(|_| ())),
-            SysReply::Network(network::query(r, false)),
+            done("vpn-import", network::vpn_import(&path).map(|_| ())),
+            SysReply::Network(network::query(false)),
         ],
-        Q::BluetoothQuery => vec![SysReply::Bluetooth(bluetooth::query(r))],
+        Q::BluetoothQuery => vec![SysReply::Bluetooth(bluetooth::query())],
         Q::BluetoothPower(on) => vec![
-            done("bluetooth", bluetooth::power(r, on)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::power(on)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::BluetoothScan(on) => vec![
-            done("bluetooth", bluetooth::scan(r, on)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::scan(on)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::BluetoothPair(m) => vec![
-            done("bluetooth", bluetooth::pair(r, &m)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::pair(&m)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::BluetoothConnect(m) => vec![
-            done("bluetooth", bluetooth::connect(r, &m)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::connect(&m)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::BluetoothDisconnect(m) => vec![
-            done("bluetooth", bluetooth::disconnect(r, &m)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::disconnect(&m)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::BluetoothRemove(m) => vec![
-            done("bluetooth", bluetooth::remove(r, &m)),
-            SysReply::Bluetooth(bluetooth::query(r)),
+            done("bluetooth", bluetooth::remove(&m)),
+            SysReply::Bluetooth(bluetooth::query()),
         ],
         Q::PowerQuery => vec![SysReply::Power(power::query(r))],
         Q::SetPowerProfile(p) => vec![
@@ -349,10 +348,6 @@ fn handle(
             SysReply::Power(power::query(r)),
         ],
         Q::Logind(a) => vec![done("logind", power::logind(a))],
-        Q::SetLidAction(a) => vec![
-            done("lid", power::set_lid_action(r, &a)),
-            SysReply::Power(power::query(r)),
-        ],
         Q::UsersQuery => vec![SysReply::Users(users::query(r))],
         Q::SetRealName { user, name } => vec![
             done("user", users::set_real_name(r, &user, &name)),

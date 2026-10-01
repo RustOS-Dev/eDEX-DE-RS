@@ -129,6 +129,27 @@ impl CompSocket {
             .unwrap_or_default())
     }
 
+    /// Session programs and whether each is running.
+    pub fn services(&self) -> Result<Vec<(String, bool)>> {
+        let v = self.call(&Request::Services)?;
+        Ok(v["services"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| {
+                        Some((x["name"].as_str()?.to_string(), x["running"].as_bool()?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    pub fn restart_service(&self, name: &str) -> Result<()> {
+        self.act(Request::RestartService {
+            name: name.to_string(),
+        })
+    }
+
     pub fn version(&self) -> Result<String> {
         let v = self.call(&Request::Version)?;
         Ok(v["version"].as_str().unwrap_or_default().to_string())

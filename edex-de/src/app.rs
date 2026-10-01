@@ -155,7 +155,9 @@ impl App {
         state.boot =
             ui::boot::BootAnimation::new(config.appearance.boot_animation && opts.smoke.is_none());
         state.username = std::env::var("USER").unwrap_or_default();
-        state.live_iso = std::path::Path::new("/run/archiso").exists();
+        // RustOS images are written from another machine (write_to_drive.sh); there is no
+        // installer to offer from inside the desktop.
+        state.live_iso = false;
         state.filesystem = ui::filesystem::FilesystemPanel::new();
 
         let (tx, rx) = channel::channel::<AppEvent>();

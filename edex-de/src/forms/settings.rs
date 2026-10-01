@@ -719,7 +719,8 @@ fn bluetooth(app: &App) -> Form {
         )
 }
 
-const LID: [&str; 5] = ["suspend", "ignore", "lock", "poweroff", "hibernate"];
+/// RustOS has no suspend: "suspend" turns the internal panel off and locks.
+const LID: [&str; 4] = ["suspend", "ignore", "lock", "poweroff"];
 
 fn power(app: &App) -> Form {
     let c = &app.config;
@@ -753,7 +754,15 @@ fn power(app: &App) -> Form {
             "%",
         ));
     }
-    ctrls.push(choice_owned(id::PROFILE, "Power profile", profiles, psel));
+    if profiles.is_empty() {
+        ctrls.push(info(
+            id::PROFILE,
+            "Power profile",
+            "unavailable".to_string(),
+        ));
+    } else {
+        ctrls.push(choice_owned(id::PROFILE, "Power profile", profiles, psel));
+    }
     Form::default().section("Power", ctrls).section(
         "Idle",
         vec![
@@ -852,7 +861,7 @@ fn security(app: &App) -> Form {
         ])
         .section("Fingerprint", fp)
         .section("System", vec![
-            info(id::FIREWALL, "Firewall (nftables)", if app.sys.privacy.firewall_active { "active" } else { "inactive" }),
+            info(id::FIREWALL, "Packet filter", if app.sys.privacy.firewall_active { "active" } else { "not available" }),
             info(id::KEYRING, "Keyring daemon", if keyring { "running" } else { "not running" }),
         ])
 }
@@ -1795,10 +1804,9 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         }
         id::LID => {
             if let Some(i) = f_idx(&ch) {
-                app.config.power.lid_close = LID[i.min(4)].into();
-                app.commit_config(platform, false);
-                app.system
-                    .send(SysRequest::SetLidAction(LID[i.min(4)].into()));
+                app.config.power.lid_close = LID[i.min(LID.len() - 1)].into();
+                // edex-comp handles the lid switch.
+                app.commit_config(platform, true);
             }
         }
         // Security

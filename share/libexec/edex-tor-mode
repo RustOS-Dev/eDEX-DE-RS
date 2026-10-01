@@ -1,0 +1,43 @@
+#!/bin/sh
+# edex-tor-mode off|socks5 — switch Tor for eDEX-DE on RustOS.
+#
+# socks5 starts the `tor` service (RustOS svc) with a SOCKS port on 127.0.0.1:9050 and a
+# cookie-authenticated control port on 127.0.0.1:9051; off stops it. The mode is recorded in
+# /run/edex-tor-mode for the Privacy panel. RustOS has no packet filter, so there is no
+# transparent mode.
+set -eu
+
+mode=${1:-}
+torrc=/etc/tor/torrc
+[ -d /storage/etc ] && torrc=/storage/etc/tor/torrc
+
+write_torrc() {
+    mkdir -p "$(dirname "$torrc")" /etc/tor/torrc.d /run/tor /var/lib/tor
+    cat > "$torrc" <<CONF
+# Written by edex-tor-mode. Bridges live in /etc/tor/torrc.d/40-bridges.conf.
+SocksPort 127.0.0.1:9050
+ControlPort 127.0.0.1:9051
+CookieAuthentication 1
+CookieAuthFile /run/tor/control.authcookie
+CookieAuthFileGroupReadable 1
+DataDirectory /var/lib/tor
+%include /etc/tor/torrc.d/*.conf
+CONF
+}
+
+case "$mode" in
+    socks5)
+        write_torrc
+        svc enable tor >/dev/null
+        svc restart tor >/dev/null 2>&1 || svc start tor >/dev/null
+        ;;
+    off)
+        svc stop tor >/dev/null 2>&1 || true
+        svc disable tor >/dev/null 2>&1 || true
+        ;;
+    *)
+        echo "usage: edex-tor-mode off|socks5" >&2
+        exit 2
+        ;;
+esac
+echo "$mode" > /run/edex-tor-mode

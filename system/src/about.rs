@@ -43,13 +43,26 @@ pub fn query(gpu: Option<String>, compositor_version: String) -> AboutInfo {
             })
         })
         .unwrap_or(0);
+    // RustOS may not ship os-release; /proc/version names the kernel ("RustOS version …").
+    let proc_version = std::fs::read_to_string("/proc/version").unwrap_or_default();
+    let (os_name, os_version) = if os_release.is_empty() {
+        let mut w = proc_version.split_whitespace();
+        let name = w.next().unwrap_or("RustOS").to_string();
+        let version = w.find(|x| *x != "version").unwrap_or("").to_string();
+        (name, version)
+    } else {
+        (field("PRETTY_NAME"), field("VERSION_ID"))
+    };
     AboutInfo {
-        os_name: field("PRETTY_NAME"),
-        os_version: field("VERSION_ID"),
+        os_name,
+        os_version,
         kernel: std::fs::read_to_string("/proc/sys/kernel/osrelease")
             .map(|s| s.trim().to_string())
-            .unwrap_or_default(),
-        hostname: std::fs::read_to_string("/etc/hostname")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| proc_version.trim().to_string()),
+        hostname: std::fs::read_to_string("/storage/etc/hostname")
+            .or_else(|_| std::fs::read_to_string("/etc/hostname"))
             .map(|s| s.trim().to_string())
             .unwrap_or_default(),
         cpu,

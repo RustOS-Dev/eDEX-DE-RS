@@ -1,6 +1,7 @@
-//! Power: battery (upower), profiles (power-profiles-daemon), logind actions, lid policy.
+//! Power: battery (UPower), profiles (power-profiles-daemon, when installed) and login1
+//! actions. The lid policy is edex-comp's (`power.lid_close` in config.toml).
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use zbus::blocking::Connection;
 
 use crate::runner::CommandRunner;
@@ -20,7 +21,6 @@ pub struct PowerState {
     pub can_hibernate: bool,
     pub can_reboot: bool,
     pub can_poweroff: bool,
-    pub lid_action: String,
 }
 
 fn upower(conn: &Connection, st: &mut PowerState) -> Result<()> {
@@ -102,23 +102,6 @@ pub fn query(r: &dyn CommandRunner) -> PowerState {
                 .collect();
         }
     }
-    if st.profiles.is_empty() {
-        st.profiles = vec![
-            "power-saver".into(),
-            "balanced".into(),
-            "performance".into(),
-        ];
-    }
-    st.lid_action = std::fs::read_to_string("/etc/systemd/logind.conf.d/50-edex.conf")
-        .ok()
-        .and_then(|t| {
-            t.lines().find_map(|l| {
-                l.trim()
-                    .strip_prefix("HandleLidSwitch=")
-                    .map(|v| v.trim().to_string())
-            })
-        })
-        .unwrap_or_else(|| "suspend".into());
     st
 }
 
@@ -156,13 +139,4 @@ pub fn logind(action: LogindAction) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Set the lid-close action through the eDEX-OS privileged helper.
-pub fn set_lid_action(r: &dyn CommandRunner, action: &str) -> Result<()> {
-    if !["suspend", "ignore", "lock", "poweroff", "hibernate"].contains(&action) {
-        return Err(anyhow!("invalid lid action {action}"));
-    }
-    r.run_ok("pkexec", &["/usr/bin/edex-logind-conf", "lid", action])
-        .map(|_| ())
 }

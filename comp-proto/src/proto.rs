@@ -205,6 +205,12 @@ pub enum Request {
     Reload,
     /// Replies `{"binds": ["SUPER+Q → close", …]}`.
     Binds,
+    /// The session programs edex-comp supervises: `{"services": [{"name", "running"}]}`.
+    Services,
+    /// Restart a session program (it is stopped and started again by its restart policy).
+    RestartService {
+        name: String,
+    },
     /// Turn every output on or off.
     Dpms {
         on: bool,

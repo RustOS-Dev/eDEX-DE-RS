@@ -1,6 +1,8 @@
-//! systemd units (system and user managers) via `systemctl`.
+//! Services: RustOS's service manager (`svc`) for the system, and the session programs
+//! edex-comp supervises (D-Bus, PipeWire, the shell…) for the user.
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
+use serde::Deserialize;
 
 use crate::runner::CommandRunner;
 
@@ -8,8 +10,11 @@ use crate::runner::CommandRunner;
 pub struct UnitInfo {
     pub name: String,
     pub description: String,
+    /// active | inactive | failed | activating
     pub active: String,
+    /// running | dead | failed | starting
     pub sub: String,
+    /// enabled | disabled | session
     pub enabled: String,
 }
 
@@ -19,65 +24,71 @@ pub struct ServicesState {
     pub units: Vec<UnitInfo>,
 }
 
-fn scope_args(user: bool) -> Vec<&'static str> {
-    if user {
-        vec!["--user"]
-    } else {
-        vec![]
-    }
+/// One entry of `svc list --json`.
+#[derive(Debug, Deserialize)]
+struct SvcEntry {
+    name: String,
+    #[serde(default)]
+    description: String,
+    enabled: bool,
+    state: String,
+}
+
+pub fn parse_svc_list(json: &str) -> Result<Vec<UnitInfo>> {
+    let entries: Vec<SvcEntry> = serde_json::from_str(json)?;
+    let mut units: Vec<UnitInfo> = entries
+        .into_iter()
+        .map(|e| UnitInfo {
+            active: match e.state.as_str() {
+                "running" => "active",
+                "starting" => "activating",
+                "failed" => "failed",
+                _ => "inactive",
+            }
+            .into(),
+            sub: match e.state.as_str() {
+                "stopped" => "dead".into(),
+                other => other.to_string(),
+            },
+            enabled: if e.enabled { "enabled" } else { "disabled" }.into(),
+            name: e.name,
+            description: e.description,
+        })
+        .collect();
+    units.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(units)
 }
 
 pub fn query(r: &dyn CommandRunner, user: bool) -> ServicesState {
-    let mut args = scope_args(user);
-    args.extend([
-        "list-units",
-        "--type=service",
-        "--all",
-        "--no-legend",
-        "--no-pager",
-        "--plain",
-    ]);
-    let mut units = Vec::new();
-    if let Ok(out) = r.run("systemctl", &args) {
-        for line in out.stdout.lines() {
-            let mut cols = line.split_whitespace();
-            let (Some(name), Some(_load), Some(active), Some(sub)) =
-                (cols.next(), cols.next(), cols.next(), cols.next())
-            else {
-                continue;
-            };
-            if name.contains('@') && !name.contains("getty") {
-                continue;
-            }
-            units.push(UnitInfo {
-                name: name.to_string(),
-                description: cols.collect::<Vec<_>>().join(" "),
-                active: active.into(),
-                sub: sub.into(),
-                enabled: String::new(),
-            });
-        }
-    }
-    let mut args = scope_args(user);
-    args.extend([
-        "list-unit-files",
-        "--type=service",
-        "--no-legend",
-        "--no-pager",
-        "--plain",
-    ]);
-    if let Ok(out) = r.run("systemctl", &args) {
-        for line in out.stdout.lines() {
-            let mut cols = line.split_whitespace();
-            if let (Some(name), Some(state)) = (cols.next(), cols.next()) {
-                if let Some(u) = units.iter_mut().find(|u| u.name == name) {
-                    u.enabled = state.to_string();
-                }
-            }
-        }
-    }
-    units.sort_by(|a, b| a.name.cmp(&b.name));
+    let units = if user {
+        session_programs()
+    } else {
+        r.run_ok("svc", &["list", "--json"])
+            .ok()
+            .and_then(|out| parse_svc_list(&out).ok())
+            .unwrap_or_default()
+    };
     ServicesState { user, units }
+}
+
+fn session_programs() -> Vec<UnitInfo> {
+    let Some(socket) = comp::CompSocket::from_env() else {
+        return Vec::new();
+    };
+    let mut units: Vec<UnitInfo> = socket
+        .services()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, running)| UnitInfo {
+            description: "session program started by edex-comp".into(),
+            active: if running { "active" } else { "inactive" }.into(),
+            sub: if running { "running" } else { "dead" }.into(),
+            enabled: "session".into(),
+            name,
+        })
+        .collect();
+    units.sort_by(|a, b| a.name.cmp(&b.name));
+    units
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +101,14 @@ pub enum UnitAction {
 }
 
 pub fn act(r: &dyn CommandRunner, user: bool, unit: &str, action: UnitAction) -> Result<()> {
+    if user {
+        let socket =
+            comp::CompSocket::from_env().ok_or_else(|| anyhow!("edex-comp is not running"))?;
+        return match action {
+            UnitAction::Restart => socket.restart_service(unit),
+            _ => bail!("session programs always run; they can only be restarted"),
+        };
+    }
     let verb = match action {
         UnitAction::Start => "start",
         UnitAction::Stop => "stop",
@@ -97,18 +116,14 @@ pub fn act(r: &dyn CommandRunner, user: bool, unit: &str, action: UnitAction) ->
         UnitAction::Enable => "enable",
         UnitAction::Disable => "disable",
     };
-    if user {
-        r.run_ok("systemctl", &["--user", verb, unit]).map(|_| ())
-    } else {
-        // System units need polkit; systemctl asks the agent via pkexec-style prompts.
-        r.run_ok("systemctl", &[verb, unit]).map(|_| ())
-    }
+    r.run_ok("svc", &[verb, unit]).map(|_| ())
 }
 
 pub fn is_active(r: &dyn CommandRunner, unit: &str) -> bool {
-    r.run("systemctl", &["is-active", "--quiet", unit])
-        .map(|o| o.ok())
-        .unwrap_or(false)
+    r.run_ok("svc", &["status", unit, "--json"])
+        .ok()
+        .and_then(|out| serde_json::from_str::<SvcEntry>(&out).ok())
+        .is_some_and(|e| e.state == "running")
 }
 
 #[cfg(test)]
@@ -116,20 +131,37 @@ mod tests {
     use super::*;
     use crate::runner::FakeRunner;
 
+    const LIST: &str = r#"[
+        {"name":"tor","description":"Tor anonymity daemon","enabled":false,"state":"stopped","pid":null,"tty":null},
+        {"name":"rustos-nmd","description":"NetworkManager D-Bus service","enabled":true,"state":"running","pid":120,"tty":null},
+        {"name":"edex","description":"eDEX desktop","enabled":true,"state":"failed","pid":null,"tty":"tty1"}
+    ]"#;
+
     #[test]
-    fn parses_units() {
-        let r = FakeRunner::default()
-            .with("systemctl list-units --type=service --all --no-legend --no-pager --plain", "tor.service loaded inactive dead Anonymizing overlay network\nNetworkManager.service loaded active running Network Manager\n")
-            .with("systemctl list-unit-files --type=service --no-legend --no-pager --plain", "tor.service disabled disabled\nNetworkManager.service enabled enabled\n");
+    fn parses_svc() {
+        let r = FakeRunner::default().with("svc list --json", LIST);
         let s = query(&r, false);
-        assert_eq!(s.units.len(), 2);
-        let nm = s
-            .units
-            .iter()
-            .find(|u| u.name == "NetworkManager.service")
-            .unwrap();
-        assert_eq!(nm.active, "active");
-        assert_eq!(nm.enabled, "enabled");
-        assert_eq!(nm.description, "Network Manager");
+        assert_eq!(s.units.len(), 3);
+        assert_eq!(s.units[0].name, "edex");
+        assert_eq!(s.units[0].active, "failed");
+        let nmd = s.units.iter().find(|u| u.name == "rustos-nmd").unwrap();
+        assert_eq!(
+            (nmd.active.as_str(), nmd.sub.as_str()),
+            ("active", "running")
+        );
+        assert_eq!(nmd.enabled, "enabled");
+        let tor = s.units.iter().find(|u| u.name == "tor").unwrap();
+        assert_eq!(
+            (tor.active.as_str(), tor.sub.as_str()),
+            ("inactive", "dead")
+        );
+        let r = FakeRunner::default().with(
+            "svc status rustos-nmd --json",
+            r#"{"name":"rustos-nmd","enabled":true,"state":"running","pid":120,"tty":null}"#,
+        );
+        assert!(is_active(&r, "rustos-nmd"));
+        assert!(!is_active(&r, "tor"));
+        act(&r, false, "tor", UnitAction::Enable).unwrap_or(());
+        assert!(r.calls().contains(&"svc enable tor".to_string()));
     }
 }

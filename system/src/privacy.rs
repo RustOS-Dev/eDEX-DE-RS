@@ -1,4 +1,5 @@
-//! Tor, Tailscale, VPN and DNS control (eDEX-OS helpers + CLIs).
+//! Tor, Tailscale, VPN and DNS. Tor is switched by the eDEX helpers in /usr/libexec/edex-de
+//! (they edit torrc and drive the `svc` service); Tailscale works when its CLI is installed.
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -93,20 +94,29 @@ fn control_port(cmd: &str) -> Result<String> {
     Ok(out)
 }
 
+/// Privileged helpers shipped with eDEX-DE.
+const HELPERS: &str = "/usr/libexec/edex-de";
+
+fn installed(program: &str) -> bool {
+    ["/usr/local/bin", "/usr/bin", "/bin"]
+        .iter()
+        .any(|d| std::path::Path::new(d).join(program).exists())
+}
+
 impl PrivacyState {
     /// Only the cheap "is it installed" facts, for display before a full query has run.
     pub fn installed_only() -> Self {
         let mut s = Self::default();
-        s.tor.installed = std::path::Path::new("/usr/bin/tor").exists();
+        s.tor.installed = installed("tor");
         s.tor.mode = "off".into();
-        s.tailscale.installed = std::path::Path::new("/usr/bin/tailscale").exists();
+        s.tailscale.installed = installed("tailscale");
         s
     }
 }
 
 pub fn tor_query(r: &dyn CommandRunner) -> TorState {
     let mut st = TorState {
-        installed: std::path::Path::new("/usr/bin/tor").exists(),
+        installed: installed("tor"),
         ..Default::default()
     };
     st.mode = std::fs::read_to_string("/run/edex-tor-mode")
@@ -161,10 +171,10 @@ pub fn tor_query(r: &dyn CommandRunner) -> TorState {
 }
 
 pub fn tor_set_mode(r: &dyn CommandRunner, mode: &str) -> Result<()> {
-    if !["off", "socks5", "transparent"].contains(&mode) {
-        return Err(anyhow!("invalid tor mode {mode}"));
+    if !["off", "socks5"].contains(&mode) {
+        return Err(anyhow!("invalid tor mode {mode} (off or socks5)"));
     }
-    r.run_ok("pkexec", &["/usr/bin/edex-tor-mode", mode])
+    r.run_ok(&format!("{HELPERS}/edex-tor-mode"), &[mode])
         .map(|_| ())
 }
 
@@ -177,8 +187,8 @@ pub fn tor_bridges(r: &dyn CommandRunner, kind: &str, lines: &str) -> Result<()>
     match kind {
         "obfs4" => r
             .run_with_stdin(
-                "pkexec",
-                &["/usr/bin/edex-tor-bridges", "obfs4", "--stdin"],
+                &format!("{HELPERS}/edex-tor-bridges"),
+                &["obfs4", "--stdin"],
                 lines,
             )
             .and_then(|o| {
@@ -189,7 +199,7 @@ pub fn tor_bridges(r: &dyn CommandRunner, kind: &str, lines: &str) -> Result<()>
                 }
             }),
         "snowflake" | "clear" => r
-            .run_ok("pkexec", &["/usr/bin/edex-tor-bridges", kind])
+            .run_ok(&format!("{HELPERS}/edex-tor-bridges"), &[kind])
             .map(|_| ()),
         other => Err(anyhow!("unknown bridge kind {other}")),
     }
@@ -249,7 +259,7 @@ struct TsExitStatus {
 
 pub fn tailscale_query(r: &dyn CommandRunner) -> TailscaleState {
     let mut st = TailscaleState {
-        installed: std::path::Path::new("/usr/bin/tailscale").exists(),
+        installed: installed("tailscale"),
         ..Default::default()
     };
     let Ok(out) = r.run("tailscale", &["status", "--json"]) else {
@@ -346,7 +356,7 @@ pub fn tailscale_advertise_exit(r: &dyn CommandRunner, on: bool) -> Result<()> {
 
 // ─── DNS / firewall ─────────────────────────────────────────────────────────
 
-pub fn dns_query(r: &dyn CommandRunner) -> DnsState {
+pub fn dns_query(_r: &dyn CommandRunner) -> DnsState {
     let resolv = std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default();
     let resolver = resolv
         .lines()
@@ -357,10 +367,14 @@ pub fn dns_query(r: &dyn CommandRunner) -> DnsState {
         })
         .unwrap_or_else(|| "none".into());
     let dnscrypt_active = sysmon::privacy::tcp_listening(53) && resolver.starts_with("127.");
-    let test_result = match r.run("getent", &["hosts", "check.torproject.org"]) {
-        Ok(o) if o.ok() => "resolves".into(),
-        Ok(_) => "no resolution".into(),
-        Err(_) => "unknown".into(),
+    use std::net::ToSocketAddrs;
+    let resolves = "check.torproject.org:443"
+        .to_socket_addrs()
+        .is_ok_and(|mut a| a.next().is_some());
+    let test_result = if resolves {
+        "resolves".into()
+    } else {
+        "no resolution".into()
     };
     DnsState {
         resolver,
@@ -370,7 +384,7 @@ pub fn dns_query(r: &dyn CommandRunner) -> DnsState {
 }
 
 pub fn firewall_active(r: &dyn CommandRunner) -> bool {
-    crate::services::is_active(r, "nftables")
+    crate::services::is_active(r, "firewall")
 }
 
 pub fn query(r: &dyn CommandRunner) -> PrivacyState {

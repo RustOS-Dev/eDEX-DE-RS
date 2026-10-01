@@ -1,0 +1,55 @@
+#!/bin/sh
+# edex-tor-bridges obfs4 --stdin | snowflake | clear — Tor bridges for eDEX-DE on RustOS.
+#
+# obfs4 reads bridge lines (one per line, or separated by ';') from standard input. The
+# pluggable transports come from the RustOS ports (obfs4proxy/lyrebird, snowflake-client).
+set -eu
+
+conf=/etc/tor/torrc.d/40-bridges.conf
+mkdir -p "$(dirname "$conf")"
+
+find_pt() {
+    for p in "$@"; do
+        for d in /usr/local/bin /usr/bin /bin; do
+            if [ -x "$d/$p" ]; then
+                echo "$d/$p"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+case "${1:-}" in
+    obfs4)
+        pt=$(find_pt lyrebird obfs4proxy) || { echo "obfs4 transport (lyrebird) is not installed" >&2; exit 1; }
+        lines=$(tr ';' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d; s/^Bridge //')
+        [ -n "$lines" ] || { echo "no bridge lines given" >&2; exit 1; }
+        {
+            echo "UseBridges 1"
+            echo "ClientTransportPlugin obfs4 exec $pt"
+            echo "$lines" | sed 's/^/Bridge /'
+        } > "$conf"
+        ;;
+    snowflake)
+        pt=$(find_pt snowflake-client) || { echo "snowflake-client is not installed" >&2; exit 1; }
+        # The snowflake port ships the current default bridge line (broker URL, fronts, STUN).
+        line=/usr/share/tor/snowflake-bridge.conf
+        [ -r "$line" ] || { echo "$line is missing (reinstall the snowflake port)" >&2; exit 1; }
+        {
+            echo "UseBridges 1"
+            echo "ClientTransportPlugin snowflake exec $pt"
+            grep '^Bridge snowflake ' "$line"
+        } > "$conf"
+        ;;
+    clear)
+        rm -f "$conf"
+        ;;
+    *)
+        echo "usage: edex-tor-bridges obfs4 --stdin | snowflake | clear" >&2
+        exit 2
+        ;;
+esac
+if [ "$(cat /run/edex-tor-mode 2>/dev/null)" = socks5 ]; then
+    svc restart tor >/dev/null
+fi

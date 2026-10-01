@@ -24,7 +24,6 @@ mod id {
     pub const TOR_OBFS4: u32 = 7;
     pub const TOR_APPLY_BRIDGES: u32 = 8;
     pub const TOR_ON_LOGIN: u32 = 9;
-    pub const TOR_CONFIRM: u32 = 10;
     pub const TS_STATE: u32 = 101;
     pub const TS_LOGIN: u32 = 102;
     pub const TS_UP: u32 = 103;
@@ -56,12 +55,12 @@ pub struct PrivacyScratch {
     pub obfs4: String,
     pub bridges: usize,
     pub vpn_path: String,
-    pub pending_transparent: bool,
     /// New WireGuard tunnel being filled in.
     pub wg: system::network::WireguardSpec,
 }
 
-const MODES: [&str; 3] = ["off", "socks5", "transparent"];
+/// RustOS has no packet filter, so there is no transparent (redirect-everything) mode.
+const MODES: [&str; 2] = ["off", "socks5"];
 const BRIDGES: [&str; 3] = ["none", "snowflake", "obfs4"];
 
 pub fn open(app: &mut App) {
@@ -138,9 +137,6 @@ fn tor(app: &App) -> Form {
             MODES.iter().position(|m| *m == t.mode).unwrap_or(0),
         ),
     ];
-    if s.pending_transparent {
-        mode.push(button(id::TOR_CONFIRM, "Transparent mode routes ALL traffic through Tor and blocks anything that cannot be. Confirm?", "ENABLE TRANSPARENT"));
-    }
     mode.extend([
         progress(
             id::TOR_BOOT,
@@ -174,7 +170,7 @@ fn tor(app: &App) -> Form {
             choice(id::TOR_BRIDGES, "Pluggable transport", &BRIDGES, s.bridges),
             text(id::TOR_OBFS4, "obfs4 bridge lines (separate with ;)", &s.obfs4, "obfs4 1.2.3.4:443 FINGERPRINT cert=… iat-mode=0"),
             button(id::TOR_APPLY_BRIDGES, "Write bridges and reload tor", "APPLY"),
-            note(0, "socks5: apps configured for 127.0.0.1:9050 use Tor.\ntransparent: everything except Tailscale and the LAN is redirected through Tor; the firewall fails closed."),
+            note(0, "socks5: apps configured for 127.0.0.1:9050 use Tor. RustOS has no packet filter, so traffic is not forced through Tor."),
         ])
 }
 
@@ -396,8 +392,8 @@ fn dns(app: &App) -> Form {
             button(id::DNS_TEST, "Resolve check.torproject.org", "TEST"),
         ])
         .section("Firewall", vec![
-            info(0, "nftables", if app.sys.privacy.firewall_active { "active" } else { "inactive" }),
-            note(0, "Inbound connections are dropped except on the Tailscale interface. Tor transparent mode adds a fail-closed output policy."),
+            info(0, "Packet filter", if app.sys.privacy.firewall_active { "active" } else { "not available on RustOS" }),
+            note(0, "RustOS does not filter packets yet: only services that listen can be reached, and the Services panel shows which run."),
         ])
 }
 
@@ -476,21 +472,10 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
     match id {
         id::TOR_MODE => {
             if let Change::Choice(i) = ch {
-                let mode = MODES[i.min(2)];
-                if mode == "transparent" {
-                    app.pscratch.pending_transparent = true;
-                } else {
-                    app.pscratch.pending_transparent = false;
-                    app.state.privacy.status = Some(format!("switching Tor to {mode}…"));
-                    app.system.send(SysRequest::TorMode(mode.into()));
-                }
+                let mode = MODES[i.min(MODES.len() - 1)];
+                app.state.privacy.status = Some(format!("switching Tor to {mode}…"));
+                app.system.send(SysRequest::TorMode(mode.into()));
             }
-        }
-        id::TOR_CONFIRM => {
-            app.pscratch.pending_transparent = false;
-            app.state.privacy.status =
-                Some("enabling transparent mode (waits for bootstrap)…".into());
-            app.system.send(SysRequest::TorMode("transparent".into()));
         }
         id::TOR_NEWNYM => app.system.send(SysRequest::TorNewnym),
         id::TOR_ON_LOGIN => {

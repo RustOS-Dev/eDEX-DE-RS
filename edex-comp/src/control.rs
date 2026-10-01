@@ -153,6 +153,27 @@ impl<B: Backend + 'static> EdexState<B> {
             Request::Binds => Reply::with_data(serde_json::json!({
                 "binds": self.config.binds.iter().map(crate::binds::describe).collect::<Vec<_>>(),
             })),
+            Request::Services => {
+                let list: Vec<serde_json::Value> = self
+                    .supervisor
+                    .as_ref()
+                    .map(|s| {
+                        let mut v: Vec<_> = s.status().into_iter().collect();
+                        v.sort();
+                        v.into_iter()
+                            .map(|(name, running)| serde_json::json!({"name": name, "running": running}))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Reply::with_data(serde_json::json!({ "services": list }))
+            }
+            Request::RestartService { name } => match self.supervisor.as_mut() {
+                Some(sup) => match sup.restart(&name) {
+                    Ok(()) => Reply::ok(),
+                    Err(e) => Reply::err(e),
+                },
+                None => Reply::err("no session"),
+            },
             Request::Reload => {
                 self.reload_config();
                 Reply::with_data(serde_json::json!({ "bind_errors": self.config.bind_errors }))
