@@ -76,6 +76,20 @@ fn dispatch(
     }
 }
 
+/// Stop editing the active text control and apply what was typed (leaving a field saves it, the
+/// same as pressing Enter).
+fn commit_editing(app: &mut App, platform: &mut Platform<AppEvent>, which: Which) {
+    let f = forms_mut(app, which);
+    let Some(id) = f.form_state.editing.take() else {
+        return;
+    };
+    let value = match f.form.control(id).map(|c| &c.kind) {
+        Some(ControlKind::Text { value, .. }) => value.clone(),
+        _ => return,
+    };
+    dispatch(app, platform, which, id, Change::Text(value));
+}
+
 /// Text typed into the focused text control.
 pub fn insert_text(app: &mut App, which: Which, text: &str) {
     let f = forms_mut(app, which);
@@ -142,8 +156,8 @@ pub fn key(app: &mut App, platform: &mut Platform<AppEvent>, which: Which, key: 
                 }
             }
             ks::KEY_Tab => {
+                commit_editing(app, platform, which);
                 let f = forms_mut(app, which);
-                f.form_state.editing = None;
                 let form = f.form.clone();
                 f.form_state
                     .focus_next(&form, if key.modifiers.shift { -1 } else { 1 });
@@ -304,13 +318,10 @@ pub fn click(
         .control(id)
         .map(|c| (c.kind.clone(), c.enabled));
     let Some((kind, enabled)) = kind else { return };
-    {
-        let f = forms_mut(app, which);
-        if f.form_state.editing != Some(id) {
-            f.form_state.editing = None;
-        }
-        f.form_state.focused = Some(id);
+    if forms(app, which).form_state.editing != Some(id) {
+        commit_editing(app, platform, which);
     }
+    forms_mut(app, which).form_state.focused = Some(id);
     if !enabled {
         return;
     }

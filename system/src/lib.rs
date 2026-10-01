@@ -174,10 +174,13 @@ impl SystemBackend {
             .name("edex-system".into())
             .spawn(move || {
                 let hypr = HyprSocket::from_env();
-                for req in rx {
-                    let replies = handle(&*runner, hypr.as_ref(), req, &sink);
-                    for r in replies {
-                        sink(r);
+                while let Ok(first) = rx.recv() {
+                    let mut pending = vec![first];
+                    pending.extend(rx.try_iter());
+                    for req in schedule(pending) {
+                        for r in handle(&*runner, hypr.as_ref(), req, &sink) {
+                            sink(r);
+                        }
                     }
                 }
             })
@@ -188,6 +191,45 @@ impl SystemBackend {
     pub fn send(&self, req: SysRequest) {
         let _ = self.tx.send(req);
     }
+}
+
+impl SysRequest {
+    /// Read-only status refreshes, which panels send periodically.
+    fn is_query(&self) -> bool {
+        matches!(
+            self,
+            SysRequest::AudioQuery
+                | SysRequest::BrightnessQuery
+                | SysRequest::NetworkQuery { .. }
+                | SysRequest::BluetoothQuery
+                | SysRequest::PowerQuery
+                | SysRequest::UsersQuery
+                | SysRequest::ServicesQuery { .. }
+                | SysRequest::DisplayQuery { .. }
+                | SysRequest::PrivacyQuery
+                | SysRequest::FprintQuery { .. }
+                | SysRequest::AboutQuery { .. }
+        )
+    }
+}
+
+/// Order a batch of waiting requests: user actions first, in the order they were made, then each
+/// kind of status query once (its latest copy). Periodic queries that arrive faster than they run
+/// (slow machines, VMs) would otherwise pile up and delay actions behind them indefinitely.
+fn schedule(pending: Vec<SysRequest>) -> Vec<SysRequest> {
+    let (queries, mut out): (Vec<_>, Vec<_>) = pending.into_iter().partition(|r| r.is_query());
+    let mut seen = Vec::new();
+    let mut latest: Vec<SysRequest> = Vec::new();
+    for q in queries.into_iter().rev() {
+        let kind = std::mem::discriminant(&q);
+        if !seen.contains(&kind) {
+            seen.push(kind);
+            latest.push(q);
+        }
+    }
+    latest.reverse();
+    out.extend(latest);
+    out
 }
 
 fn done(what: &str, res: anyhow::Result<()>) -> SysReply {
@@ -433,5 +475,34 @@ fn handle(
                 .unwrap_or_else(|| "not connected".into());
             vec![SysReply::About(about::query(gpu, hv))]
         }
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::*;
+
+    #[test]
+    fn actions_first_and_queries_coalesced() {
+        let batch = vec![
+            SysRequest::PrivacyQuery,
+            SysRequest::NetworkQuery { rescan: false },
+            SysRequest::PrivacyQuery,
+            SysRequest::VpnImport("a.conf".into()),
+            SysRequest::NetworkQuery { rescan: true },
+            SysRequest::PrivacyQuery,
+            SysRequest::TorNewnym,
+        ];
+        let out = schedule(batch);
+        let names: Vec<String> = out.iter().map(|r| format!("{r:?}")).collect();
+        assert_eq!(
+            names,
+            [
+                "VpnImport(\"a.conf\")",
+                "TorNewnym",
+                "NetworkQuery { rescan: true }",
+                "PrivacyQuery",
+            ]
+        );
     }
 }
