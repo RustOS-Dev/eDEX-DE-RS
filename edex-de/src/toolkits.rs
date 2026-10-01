@@ -204,13 +204,16 @@ pub fn render(
     ));
     let gtk_settings = |theme_line: &str| {
         format!(
-            "# {MARK} (remove this line to keep your changes)\n[Settings]\n{theme_line}gtk-icon-theme-name={ICON_THEME}\ngtk-cursor-theme-name={CURSOR_THEME}\ngtk-font-name={font} {font_pt}\ngtk-application-prefer-dark-theme=1\n"
+            "# {MARK} (remove this line to keep your changes)\n[Settings]\n{theme_line}gtk-icon-theme-name={ICON_THEME}\ngtk-cursor-theme-name={CURSOR_THEME}\ngtk-font-name={font} {font_pt}\n"
         )
     };
     out.push((
         PathBuf::from("gtk-3.0/settings.ini"),
-        gtk_settings(&format!("gtk-theme-name={GTK3_THEME}\n")),
+        gtk_settings(&format!(
+            "gtk-theme-name={GTK3_THEME}\ngtk-application-prefer-dark-theme=1\n"
+        )),
     ));
+    // No prefer-dark here: libadwaita rejects it and takes the gsettings color-scheme instead.
     out.push((PathBuf::from("gtk-4.0/settings.ini"), gtk_settings("")));
     let t = theme;
     let window = hex(t.panel_bg);
@@ -329,6 +332,8 @@ mod tests {
         assert!(scheme.contains("[Colors:Window]") && scheme.contains("Name=eDEX"));
         assert!(get("gtk-3.0/settings.ini").contains("gtk-theme-name=adw-gtk3-dark"));
         assert!(!get("gtk-4.0/settings.ini").contains("gtk-theme-name"));
+        assert!(!get("gtk-4.0/settings.ini").contains("prefer-dark"));
+        assert!(get("gtk-3.0/settings.ini").contains("gtk-application-prefer-dark-theme=1"));
         assert!(
             get("gtk-4.0/gtk.css").contains(&format!("--accent-bg-color: {}", hex(theme.accent)))
         );
