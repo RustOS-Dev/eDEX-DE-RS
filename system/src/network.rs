@@ -304,7 +304,8 @@ pub fn wireguard_create(r: &dyn CommandRunner, spec: &WireguardSpec) -> Result<S
     );
     let _ = std::fs::remove_dir_all(&dir);
     imported?;
-    // Connect on request, not automatically at boot.
+    // Connect on request only: importing activates the connection right away, which with
+    // AllowedIPs 0.0.0.0/0 would send all traffic to a server that may not know this key yet.
     let _ = r.run(
         "nmcli",
         &[
@@ -315,6 +316,7 @@ pub fn wireguard_create(r: &dyn CommandRunner, spec: &WireguardSpec) -> Result<S
             "no",
         ],
     );
+    let _ = r.run("nmcli", &["connection", "down", &spec.name]);
     let out = r.run_with_stdin("wg", &["pubkey"], &format!("{private}\n"))?;
     Ok(out.stdout.trim().to_string())
 }
@@ -387,6 +389,7 @@ mod tests {
         );
         assert!(calls
             .contains(&"nmcli connection modify wg-home connection.autoconnect no".to_string()));
+        assert!(calls.contains(&"nmcli connection down wg-home".to_string()));
     }
 
     #[test]
