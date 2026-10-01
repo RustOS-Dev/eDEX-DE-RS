@@ -2,11 +2,13 @@
 # edex-tor-bridges obfs4 --stdin | snowflake | clear — Tor bridges for eDEX-DE on RustOS.
 #
 # obfs4 reads bridge lines (one per line, or separated by ';') from standard input. The
-# pluggable transports come from the RustOS ports (obfs4proxy/lyrebird, snowflake-client).
+# pluggable transports come from the RustOS tor-pt port (lyrebird, snowflake-client).
 set -eu
 
-conf=/etc/tor/torrc.d/40-bridges.conf
-mkdir -p "$(dirname "$conf")"
+dir=/etc/tor
+[ -d /storage/etc ] && dir=/storage/etc/tor
+conf=$dir/torrc.d/40-bridges.conf
+mkdir -p "$dir/torrc.d"
 
 find_pt() {
     for p in "$@"; do
@@ -35,7 +37,7 @@ case "${1:-}" in
         pt=$(find_pt snowflake-client) || { echo "snowflake-client is not installed" >&2; exit 1; }
         # The snowflake port ships the current default bridge line (broker URL, fronts, STUN).
         line=/usr/share/tor/snowflake-bridge.conf
-        [ -r "$line" ] || { echo "$line is missing (reinstall the snowflake port)" >&2; exit 1; }
+        [ -r "$line" ] || { echo "$line is missing (reinstall the tor-pt port)" >&2; exit 1; }
         {
             echo "UseBridges 1"
             echo "ClientTransportPlugin snowflake exec $pt"
@@ -50,6 +52,6 @@ case "${1:-}" in
         exit 2
         ;;
 esac
-if [ "$(cat /run/edex-tor-mode 2>/dev/null)" = socks5 ]; then
+if [ "$(cat "$dir/edex-mode" 2>/dev/null)" = socks5 ]; then
     svc restart tor >/dev/null
 fi

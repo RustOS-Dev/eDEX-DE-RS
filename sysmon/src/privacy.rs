@@ -4,7 +4,7 @@ use std::{fs, path::Path, time::Instant};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PrivacyStatus {
-    /// off | socks5 | transparent (from /run/edex-tor-mode when present).
+    /// off | socks5 (from `edex-mode` in [`tor_dir`] when present).
     pub tor_mode: String,
     pub tor_active: bool,
     pub tailscale_connected: bool,
@@ -49,9 +49,7 @@ impl PrivacyProbe {
             self.camera = device_in_use("/dev/video", "");
             self.last_devices = Some(now);
         }
-        let tor_mode = fs::read_to_string("/run/edex-tor-mode")
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+        let tor_mode = tor_mode().unwrap_or_default();
         let tor_listening = tcp_listening(9050);
         let tor_active = if tor_mode.is_empty() {
             tor_listening
@@ -187,6 +185,23 @@ fn device_in_use(prefix: &str, suffix: &str) -> bool {
         }
     }
     false
+}
+
+/// Where edex-tor-mode keeps torrc, `torrc.d/` (bridges) and `edex-mode`: on the persistent
+/// storage partition when there is one.
+pub fn tor_dir() -> std::path::PathBuf {
+    if std::path::Path::new("/storage/etc").is_dir() {
+        "/storage/etc/tor".into()
+    } else {
+        "/etc/tor".into()
+    }
+}
+
+/// The mode edex-tor-mode last set (`off` or `socks5`), if it ever ran.
+pub fn tor_mode() -> Option<String> {
+    fs::read_to_string(tor_dir().join("edex-mode"))
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 #[cfg(test)]

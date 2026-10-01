@@ -119,21 +119,20 @@ pub fn tor_query(r: &dyn CommandRunner) -> TorState {
         installed: installed("tor"),
         ..Default::default()
     };
-    st.mode = std::fs::read_to_string("/run/edex-tor-mode")
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "off".into());
+    st.mode = sysmon::privacy::tor_mode().unwrap_or_else(|| "off".into());
     st.running = sysmon::privacy::tcp_listening(9050);
-    st.bridges = std::fs::read_to_string("/etc/tor/torrc.d/40-bridges.conf")
-        .map(|t| {
-            if t.contains("snowflake") {
-                "snowflake".into()
-            } else if t.contains("obfs4") {
-                "obfs4".into()
-            } else {
-                "none".into()
-            }
-        })
-        .unwrap_or_else(|_| "none".into());
+    st.bridges =
+        std::fs::read_to_string(sysmon::privacy::tor_dir().join("torrc.d/40-bridges.conf"))
+            .map(|t| {
+                if t.contains("snowflake") {
+                    "snowflake".into()
+                } else if t.contains("obfs4") {
+                    "obfs4".into()
+                } else {
+                    "none".into()
+                }
+            })
+            .unwrap_or_else(|_| "none".into());
     if st.running {
         if let Ok(out) =
             control_port("GETINFO status/bootstrap-phase status/circuit-established version")

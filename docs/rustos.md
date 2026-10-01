@@ -8,8 +8,10 @@ and how eDEX-DE behaves when one is missing.
 
 * Target `x86_64-unknown-linux-musl`, dynamically linked (`-C target-feature=-crt-static`) against
   the RustOS ports, baseline x86-64 (the RustOS kernel saves FPU state with FXSAVE: no AVX).
-* The RustOS port recipe (`ports/edex-de/build.sh` in RustOS) sets the linker and the pkg-config
-  sysroot and installs:
+* The RustOS port recipe (`ports/edex-de/build.sh` in RustOS) builds a pinned commit (or your
+  checkout with `EDEX_SRC=…`), links with `tools/rustos-cc`, finds the desktop libraries through
+  `tools/cross/pkg-config` (M37), and installs (RustOS's `RUSTOS_DESKTOP=1` build puts the desktop
+  ports of `ports/desktop.list` into the image):
 
 | From | To |
 |---|---|
@@ -18,6 +20,9 @@ and how eDEX-DE behaves when one is missing.
 | `share/libexec/*` | `/usr/libexec/edex-de` |
 | `packaging/greeter/greeter.toml` | `/etc/edex-greeter/greeter.toml` |
 | `packaging/applications/*.desktop` | `/usr/share/applications` |
+
+Other RustOS ports in `ports/desktop.list`: `jetbrains-mono-nerd` (the UI font), `tor`,
+`tor-pt` and `wireguard-tools` (`wg`, for WireGuard keys).
 
 ## Kernel and system (RustOS milestones)
 
@@ -87,7 +92,7 @@ Services eDEX-DE expects (shipped disabled by RustOS until their programs are in
 |---|---|
 | `edex` | `edex-comp --greeter` on tty1 |
 | `seatd`, `dbus`, `upower`, `rustos-nmd` | the desktop services |
-| `tor` | `tor -f /storage/etc/tor/torrc` (or `/etc/tor/torrc`), switched by `edex-tor-mode` |
+| `tor` | `tor -f /storage/etc/tor/torrc` (or `/etc/tor/torrc`), switched by `edex-tor-mode`; bridges through the `tor-pt` port (lyrebird, snowflake-client) |
 
 ## Accounts
 
@@ -96,6 +101,11 @@ first, then `/etc`, SHA-512 crypt (`$6$`), an empty hash for "no password" and `
 locked account; edits are written to `/storage/etc`. RustOS currently runs everything as uid 0; once
 it has real users, install `edex-auth` set-uid root: it lets callers change only their own account
 and requires root for lock and unlock.
+
+The same goes for the system changes the shell makes directly: `svc start|stop|enable|disable`
+(init's control FIFO is root-only), `/usr/libexec/edex-de/edex-tor-*` (they write
+`/storage/etc/tor` and drive `svc`) and the backlight. With real users these need a small
+privilege broker (the role polkit plays on Linux); until then the shell's session runs as root.
 
 ## Without the full stack
 

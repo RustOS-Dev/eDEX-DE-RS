@@ -38,9 +38,10 @@ what it needs from RustOS.
 RustOS builds eDEX-DE from source in its ports tree:
 
 ```bash
-# in a RustOS checkout
-tools/install-port.sh --initramfs edex-de     # or: add edex-de to ports/default.list
-cargo build && ./write_to_drive.sh --drive /dev/sdX
+# in a RustOS checkout: build the image with the desktop ports (ports/desktop.list)
+RUSTOS_DESKTOP=1 cargo build && ./write_to_drive.sh --drive /dev/sdX
+# a local eDEX-DE checkout instead of the pinned commit:
+EDEX_SRC=$HOME/eDEX-DE-RS RUSTOS_DESKTOP=1 cargo build
 ```
 
 On the running system, turn the desktop on (it runs on tty1 and starts at every boot):
