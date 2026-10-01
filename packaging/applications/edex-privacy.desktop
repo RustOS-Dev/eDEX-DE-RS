@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=eDEX Privacy
+GenericName=Privacy and VPN
+Comment=Tor modes and bridges, Tailscale, WireGuard and other VPNs, DNS and firewall
+Exec=edex-de ipc show privacy
+Icon=edex-de
+Terminal=false
+TryExec=edex-de
+Categories=Settings;Security;
+Keywords=privacy;tor;onion;bridges;tailscale;vpn;wireguard;openvpn;dns;dnscrypt;firewall;anonymity;
+StartupNotify=false

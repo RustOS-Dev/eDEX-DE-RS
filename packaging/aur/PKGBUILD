@@ -72,6 +72,7 @@ package() {
     install -Dm755 target/release/edex-greeter "$pkgdir/usr/bin/edex-greeter"
     install -Dm755 packaging/session/edex-session "$pkgdir/usr/bin/edex-session"
     install -Dm644 packaging/session/edex-de.desktop "$pkgdir/usr/share/wayland-sessions/edex-de.desktop"
+    install -Dm644 -t "$pkgdir/usr/share/applications" packaging/applications/*.desktop
     install -Dm644 packaging/session/edex-de-portals.conf "$pkgdir/usr/share/xdg-desktop-portal/edex-de-portals.conf"
     install -Dm644 packaging/systemd/edex-de.service "$pkgdir/usr/lib/systemd/user/edex-de.service"
     install -Dm644 packaging/tmpfiles/edex-greeter.conf "$pkgdir/usr/lib/tmpfiles.d/edex-greeter.conf"

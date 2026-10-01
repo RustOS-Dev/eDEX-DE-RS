@@ -38,6 +38,7 @@ install -Dm755 target/release/edex-de %{buildroot}%{_bindir}/edex-de
 install -Dm755 target/release/edex-greeter %{buildroot}%{_bindir}/edex-greeter
 install -Dm755 packaging/session/edex-session %{buildroot}%{_bindir}/edex-session
 install -Dm644 packaging/session/edex-de.desktop %{buildroot}%{_datadir}/wayland-sessions/edex-de.desktop
+install -Dm644 -t %{buildroot}%{_datadir}/applications packaging/applications/*.desktop
 install -Dm644 packaging/session/edex-de-portals.conf %{buildroot}%{_datadir}/xdg-desktop-portal/edex-de-portals.conf
 install -Dm644 packaging/systemd/edex-de.service %{buildroot}%{_userunitdir}/edex-de.service
 install -Dm644 packaging/tmpfiles/edex-greeter.conf %{buildroot}%{_tmpfilesdir}/edex-greeter.conf
@@ -61,6 +62,8 @@ install -Dm644 assets/logo.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/ap
 %{_bindir}/edex-greeter
 %{_bindir}/edex-session
 %{_datadir}/wayland-sessions/edex-de.desktop
+%{_datadir}/applications/edex-settings.desktop
+%{_datadir}/applications/edex-privacy.desktop
 %{_datadir}/xdg-desktop-portal/edex-de-portals.conf
 %{_userunitdir}/edex-de.service
 %{_tmpfilesdir}/edex-greeter.conf

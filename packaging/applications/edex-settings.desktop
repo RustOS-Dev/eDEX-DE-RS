@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=eDEX Settings
+GenericName=System Settings
+Comment=Appearance, display, input, sound, network, Bluetooth, power, users and more
+Exec=edex-de ipc show settings
+Icon=edex-de
+Terminal=false
+TryExec=edex-de
+Categories=Settings;
+Keywords=settings;preferences;control;theme;wallpaper;display;monitor;keyboard;mouse;touchpad;sound;audio;volume;network;wifi;wi-fi;bluetooth;power;battery;brightness;users;password;notifications;services;fingerprint;
+StartupNotify=false
