@@ -32,6 +32,30 @@ pub struct WorkspaceInfo {
     pub last_window_title: String,
 }
 
+/// A mapped application window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClientInfo {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub workspace_id: i32,
+    pub workspace: String,
+    pub floating: bool,
+    /// 0 none, 1 maximized, 2 fullscreen (Hyprland's internal state).
+    pub fullscreen: i32,
+}
+
+impl ClientInfo {
+    pub fn minimized(&self) -> bool {
+        self.workspace == crate::socket::MINIMIZED_WORKSPACE
+    }
+}
+
+/// Addresses in events lack the `0x` prefix that `clients` prints.
+fn same_address(a: &str, b: &str) -> bool {
+    a.trim_start_matches("0x") == b.trim_start_matches("0x")
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HyprState {
     pub connected: bool,
@@ -43,6 +67,9 @@ pub struct HyprState {
     pub submap: String,
     pub screencast_active: bool,
     pub urgent_windows: Vec<String>,
+    pub clients: Vec<ClientInfo>,
+    /// Address of the focused window.
+    pub active_address: Option<String>,
 }
 
 impl HyprState {
@@ -68,9 +95,19 @@ impl HyprState {
             Err(e) => tracing::warn!("hyprland workspaces query failed: {e:#}"),
         }
         match socket.active_window() {
-            Ok(Some(w)) => self.active_window = Some((w.class, w.title)),
-            Ok(None) => self.active_window = None,
+            Ok(Some(w)) => {
+                self.active_address = (!w.address.is_empty()).then_some(w.address);
+                self.active_window = Some((w.class, w.title));
+            }
+            Ok(None) => {
+                self.active_window = None;
+                self.active_address = None;
+            }
             Err(e) => tracing::debug!("activewindow query failed: {e:#}"),
+        }
+        match socket.clients() {
+            Ok(c) => self.clients = c,
+            Err(e) => tracing::warn!("hyprland clients query failed: {e:#}"),
         }
         if let Ok(Some(layout)) = socket.active_layout() {
             self.keyboard_layout = layout;
@@ -119,6 +156,18 @@ impl HyprState {
                 };
                 false
             }
+            HyprEvent::ActiveWindowAddress(addr) => {
+                self.active_address = if addr.is_empty() {
+                    None
+                } else if let Some(c) = self.clients.iter().find(|c| same_address(&c.address, addr))
+                {
+                    Some(c.address.clone())
+                } else {
+                    // A window we have not seen yet: resync picks it up.
+                    return true;
+                };
+                false
+            }
             HyprEvent::CreateWorkspace { id, name } => {
                 if !self.workspaces.iter().any(|w| &w.name == name) {
                     let monitor = self
@@ -158,12 +207,13 @@ impl HyprState {
             HyprEvent::OpenWindow { workspace, .. } => {
                 if let Some(w) = self.workspaces.iter_mut().find(|w| &w.name == workspace) {
                     w.windows += 1;
-                    false
-                } else {
-                    true
                 }
+                // The window list needs the full client record.
+                true
             }
-            HyprEvent::CloseWindow(_) | HyprEvent::MoveWindow { .. } => true,
+            HyprEvent::CloseWindow(_)
+            | HyprEvent::MoveWindow { .. }
+            | HyprEvent::FloatingMode { .. } => true,
             HyprEvent::ActiveLayout { layout, .. } => {
                 self.keyboard_layout = layout.clone();
                 false
@@ -186,8 +236,20 @@ impl HyprState {
             | HyprEvent::MonitorRemoved(_)
             | HyprEvent::ConfigReloaded
             | HyprEvent::Fullscreen(_) => true,
-            HyprEvent::WindowTitle { .. }
-            | HyprEvent::OpenLayer(_)
+            HyprEvent::WindowTitle { address, title } => match title {
+                Some(t) => {
+                    if let Some(c) = self
+                        .clients
+                        .iter_mut()
+                        .find(|c| same_address(&c.address, address))
+                    {
+                        c.title = t.clone();
+                    }
+                    false
+                }
+                None => true,
+            },
+            HyprEvent::OpenLayer(_)
             | HyprEvent::CloseLayer(_)
             | HyprEvent::Bell(_)
             | HyprEvent::Other { .. } => false,
@@ -231,6 +293,59 @@ impl HyprState {
         }
         strip.sort_by_key(|w| w.id);
         strip
+    }
+
+    /// Active workspace of the named monitor, or of the focused one when `None`.
+    pub fn active_workspace_of(&self, monitor: Option<&str>) -> Option<i32> {
+        self.monitors
+            .iter()
+            .find(|m| monitor.map_or(m.focused, |n| m.name == n))
+            .or(self.monitors.first())
+            .map(|m| m.active_workspace)
+    }
+
+    /// Tabs for the windows on the focused monitor's workspace, then minimized windows.
+    pub fn window_tabs(&self) -> Vec<ui::state::WindowTab> {
+        let ws = self.active_workspace_of(None);
+        let tab = |c: &ClientInfo| ui::state::WindowTab {
+            address: c.address.clone(),
+            class: c.class.clone(),
+            title: c.title.clone(),
+            active: self.active_address.as_deref() == Some(c.address.as_str()) && !c.minimized(),
+            minimized: c.minimized(),
+            maximized: c.fullscreen == 1,
+            floating: c.floating,
+        };
+        let mut tabs: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|c| Some(c.workspace_id) == ws && !c.minimized())
+            .map(tab)
+            .collect();
+        // Hyprland does not always report focus (e.g. a window opened while the shell held the
+        // keyboard): a lone window is the one the controls act on.
+        if !tabs.iter().any(|t| t.active) && tabs.len() == 1 {
+            tabs[0].active = true;
+        }
+        tabs.extend(self.clients.iter().filter(|c| c.minimized()).map(tab));
+        tabs
+    }
+
+    /// A window on this monitor's visible workspace is maximized: the shell hides its side
+    /// panels so it gets the full width (the top bar and the window controls stay).
+    pub fn maximized_on(&self, monitor: &str) -> bool {
+        let ws = self.active_workspace_of(Some(monitor));
+        self.clients
+            .iter()
+            .any(|c| Some(c.workspace_id) == ws && c.fullscreen == 1)
+    }
+
+    /// Tiled windows cover the terminal on this monitor's visible workspace.
+    pub fn tiled_on(&self, monitor: &str) -> bool {
+        let ws = self.active_workspace_of(Some(monitor));
+        self.clients
+            .iter()
+            .any(|c| Some(c.workspace_id) == ws && !c.floating)
     }
 
     /// Short summary of the active keyboard layout (e.g. "English (US)" → "US").
@@ -291,7 +406,8 @@ mod tests {
             name: "2".into()
         }));
         assert_eq!(st.monitors[0].active_workspace, 2);
-        assert!(!st.apply(&HyprEvent::OpenWindow {
+        // New windows need the full client record: resync.
+        assert!(st.apply(&HyprEvent::OpenWindow {
             address: "a".into(),
             workspace: "2".into(),
             class: "kitty".into(),
@@ -307,5 +423,67 @@ mod tests {
         });
         assert_eq!(st.short_layout(), "US");
         assert!(st.apply(&HyprEvent::ConfigReloaded));
+    }
+
+    fn client(addr: &str, ws: i32, name: &str, fullscreen: i32) -> ClientInfo {
+        ClientInfo {
+            address: addr.into(),
+            class: "app".into(),
+            title: format!("title {addr}"),
+            workspace_id: ws,
+            workspace: name.into(),
+            floating: false,
+            fullscreen,
+        }
+    }
+
+    #[test]
+    fn window_tabs_list_the_workspace_then_minimized() {
+        let mut st = HyprState {
+            connected: true,
+            ..Default::default()
+        };
+        st.monitors.push(MonitorInfo {
+            id: 0,
+            name: "DP-1".into(),
+            description: String::new(),
+            width: 1920,
+            height: 1080,
+            refresh_rate: 60.0,
+            x: 0,
+            y: 0,
+            scale: 1.0,
+            focused: true,
+            active_workspace: 1,
+            active_workspace_name: "1".into(),
+            transform: 0,
+            dpms: true,
+            disabled: false,
+            available_modes: vec![],
+        });
+        st.clients = vec![
+            client("0xa", 1, "1", 0),
+            client("0xb", -98, crate::socket::MINIMIZED_WORKSPACE, 0),
+            client("0xc", 2, "2", 0),
+            client("0xd", 1, "1", 0),
+        ];
+        assert!(!st.apply(&HyprEvent::ActiveWindowAddress("d".into())));
+        let tabs = st.window_tabs();
+        let addrs: Vec<_> = tabs.iter().map(|t| t.address.as_str()).collect();
+        assert_eq!(addrs, ["0xa", "0xd", "0xb"]);
+        assert!(tabs[1].active && !tabs[0].active);
+        assert!(tabs[2].minimized);
+        assert!(st.tiled_on("DP-1"));
+        assert!(!st.maximized_on("DP-1"));
+        st.clients[3].fullscreen = 1;
+        assert!(st.maximized_on("DP-1"));
+        // Title updates arrive with addresses lacking 0x.
+        assert!(!st.apply(&HyprEvent::WindowTitle {
+            address: "a".into(),
+            title: Some("new".into())
+        }));
+        assert_eq!(st.clients[0].title, "new");
+        // An unknown focused window asks for a resync.
+        assert!(st.apply(&HyprEvent::ActiveWindowAddress("ff".into())));
     }
 }

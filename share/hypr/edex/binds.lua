@@ -24,10 +24,15 @@ hl.bind(mod .. " + B", hl.dsp.exec_cmd("xdg-open https://"))
 -- Window management
 hl.bind(mod .. " + Q", hl.dsp.window.close())
 hl.bind(mod .. " + SHIFT + Q", hl.dsp.window.kill())
-hl.bind(mod .. " + F", hl.dsp.window.fullscreen({ action = "toggle", mode = "fullscreen" }))
--- Hide/show the file and system side panels: apps then use the full width under the top bar.
-hl.bind(mod .. " + SHIFT + F", ipc("action side-panels"))
-hl.bind(mod .. " + M", hl.dsp.window.fullscreen({ action = "toggle", mode = "maximized" }))
+-- Maximize (the □ button): the window gets the full width; the shell hides its side panels
+-- while it is maximized and keeps the tab strip with the window controls visible.
+hl.bind(mod .. " + F", hl.dsp.window.fullscreen({ action = "toggle", mode = "maximized" }))
+-- True fullscreen over everything (games, video).
+hl.bind(mod .. " + SHIFT + F", hl.dsp.window.fullscreen({ action = "toggle", mode = "fullscreen" }))
+-- Minimize (the ↓ button): the window becomes a tab in the centre panel; click it to restore.
+hl.bind(mod .. " + M", hl.dsp.window.move({ workspace = "special:minimized", follow = false }))
+-- Hide/show the file and system side panels for every app.
+hl.bind(mod .. " + CTRL + F", ipc("action side-panels"))
 hl.bind(mod .. " + V", hl.dsp.window.float({ action = "toggle" }))
 hl.bind(mod .. " + C", hl.dsp.window.center())
 hl.bind(mod .. " + T", hl.dsp.window.pseudo())

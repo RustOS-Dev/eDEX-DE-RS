@@ -5,8 +5,8 @@ pub mod model;
 pub mod socket;
 
 pub use events::HyprEvent;
-pub use model::{HyprState, MonitorInfo, WorkspaceInfo};
-pub use socket::{lua_string, HyprSocket};
+pub use model::{ClientInfo, HyprState, MonitorInfo, WorkspaceInfo};
+pub use socket::{lua_string, HyprSocket, MINIMIZED_WORKSPACE};
 
 use std::path::PathBuf;
 

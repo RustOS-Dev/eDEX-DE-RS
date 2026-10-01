@@ -32,6 +32,9 @@ pub enum SurfaceRole {
     Overlay,
     /// Small overlay-layer surface for toasts and OSDs.
     Toast,
+    /// Top-layer bar over the centre panel's tab strip. Hyprland stops sending pointer input to
+    /// background layers while a window is maximized, so the window controls live up here.
+    Strip,
     /// xdg-toplevel window (used by the greeter under cage).
     Window,
 }

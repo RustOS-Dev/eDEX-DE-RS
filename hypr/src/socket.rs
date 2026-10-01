@@ -11,7 +11,10 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
-use crate::model::{MonitorInfo, WorkspaceInfo};
+use crate::model::{ClientInfo, MonitorInfo, WorkspaceInfo};
+
+/// Hidden special workspace that holds minimized windows.
+pub const MINIMIZED_WORKSPACE: &str = "special:minimized";
 
 #[derive(Clone, Debug)]
 pub struct HyprSocket {
@@ -65,6 +68,24 @@ struct RawWorkspace {
     has_fullscreen: bool,
     #[serde(rename = "lastwindowtitle", default)]
     last_window_title: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawClient {
+    address: String,
+    #[serde(default = "default_true")]
+    mapped: bool,
+    #[serde(default)]
+    hidden: bool,
+    workspace: RawWorkspaceRef,
+    #[serde(default)]
+    floating: bool,
+    #[serde(default)]
+    class: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    fullscreen: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -156,6 +177,66 @@ impl HyprSocket {
     /// Quit the Hyprland session.
     pub fn exit(&self) -> Result<()> {
         self.dispatch("hl.dsp.exit()")
+    }
+
+    /// All mapped windows, in Hyprland's order (oldest first).
+    pub fn clients(&self) -> Result<Vec<ClientInfo>> {
+        let raw: Vec<RawClient> = self.json("clients")?;
+        Ok(raw
+            .into_iter()
+            .filter(|c| c.mapped && !c.hidden)
+            .map(|c| ClientInfo {
+                address: c.address,
+                class: c.class,
+                title: c.title,
+                workspace_id: c.workspace.id,
+                workspace: c.workspace.name,
+                floating: c.floating,
+                fullscreen: c.fullscreen,
+            })
+            .collect())
+    }
+
+    /// Close a window politely (like its own close button).
+    pub fn close_window(&self, address: &str) -> Result<()> {
+        self.dispatch(&format!(
+            "hl.dsp.window.close({{ window = {} }})",
+            window_selector(address)
+        ))
+    }
+
+    /// Toggle the maximized state: the window fills the area left by the shell's panels.
+    pub fn toggle_maximized(&self, address: &str) -> Result<()> {
+        self.dispatch(&format!(
+            "hl.dsp.window.fullscreen({{ action = \"toggle\", mode = \"maximized\", window = {} }})",
+            window_selector(address)
+        ))
+    }
+
+    /// Minimize: park the window on the hidden minimized workspace (`follow = false`, or
+    /// Hyprland opens the special workspace on top).
+    pub fn minimize_window(&self, address: &str) -> Result<()> {
+        self.dispatch(&format!(
+            "hl.dsp.window.move({{ workspace = {}, window = {}, follow = false }})",
+            lua_string(MINIMIZED_WORKSPACE),
+            window_selector(address)
+        ))
+    }
+
+    /// Bring a window to workspace `workspace` (e.g. back from minimized) and focus it.
+    pub fn restore_window(&self, address: &str, workspace: i32) -> Result<()> {
+        self.dispatch(&format!(
+            "hl.dsp.window.move({{ workspace = {workspace}, window = {}, follow = false }})",
+            window_selector(address)
+        ))?;
+        self.focus_window(address)
+    }
+
+    pub fn focus_window(&self, address: &str) -> Result<()> {
+        self.dispatch(&format!(
+            "hl.dsp.focus({{ window = {} }})",
+            window_selector(address)
+        ))
     }
 
     /// Number of windows on the focused workspace (queried live).
@@ -310,6 +391,25 @@ mod tests {
         assert_eq!(parsed[0].active_workspace.id, 3);
         assert_eq!(parsed[0].available_modes.len(), 1);
     }
+
+    #[test]
+    fn parses_client_json() {
+        let raw = r#"[{"address":"0x5f1c","mapped":true,"hidden":false,"at":[0,0],"size":[10,10],"workspace":{"id":-98,"name":"special:minimized"},"floating":false,"class":"kitty","title":"fish","fullscreen":1,"focusHistoryID":0}]"#;
+        let parsed: Vec<RawClient> = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed[0].workspace.name, MINIMIZED_WORKSPACE);
+        assert_eq!(parsed[0].fullscreen, 1);
+    }
+}
+
+/// Lua selector for the window with this address (`0x…` as Hyprland prints it).
+fn window_selector(address: &str) -> String {
+    let addr = address.trim_start_matches("address:");
+    let addr = if addr.starts_with("0x") {
+        addr.to_string()
+    } else {
+        format!("0x{addr}")
+    };
+    lua_string(&format!("address:{addr}"))
 }
 
 /// Quote `s` as a Lua string literal.
@@ -342,5 +442,12 @@ mod lua_tests {
             "\"cd \\\"/a b\\\" && echo 'x'\\\\n\""
         );
         assert_eq!(lua_string("a\nb"), "\"a\\nb\"");
+    }
+
+    #[test]
+    fn window_selectors_use_the_address_prefix() {
+        assert_eq!(super::window_selector("0x55aa"), "\"address:0x55aa\"");
+        // Event payloads carry the address without 0x.
+        assert_eq!(super::window_selector("55aa"), "\"address:0x55aa\"");
     }
 }

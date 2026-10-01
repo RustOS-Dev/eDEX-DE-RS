@@ -196,6 +196,37 @@ fn open_terminal_at(app: &mut App, cwd: std::path::PathBuf) {
     app.mark_canvas_dirty();
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowAction {
+    Focus,
+    Minimize,
+    Restore,
+    ToggleMaximize,
+    Close,
+}
+
+/// Apply a window control through Hyprland; the resulting events refresh the tab strip.
+pub fn window_action(app: &mut App, address: &str, action: WindowAction) {
+    let Some(h) = &app.hypr else {
+        return;
+    };
+    let result = match action {
+        WindowAction::Focus => h.focus_window(address),
+        WindowAction::Minimize => h.minimize_window(address),
+        WindowAction::Restore => match app.hypr_state.active_workspace_of(None) {
+            Some(ws) => h.restore_window(address, ws),
+            None => Ok(()),
+        },
+        WindowAction::ToggleMaximize => h
+            .focus_window(address)
+            .and_then(|_| h.toggle_maximized(address)),
+        WindowAction::Close => h.close_window(address),
+    };
+    if let Err(e) = result {
+        tracing::warn!("window {action:?} {address}: {e:#}");
+    }
+}
+
 pub fn close_tab(app: &mut App, index: usize) {
     if app.terminal.len() <= 1 {
         // Closing the last tab replaces it with a fresh shell.
@@ -422,7 +453,9 @@ pub fn pointer_button(
             app.mark_overlay_dirty();
         }
         Some(SurfaceRole::Toast) => toast_click(app, platform, target),
-        Some(SurfaceRole::Canvas) => canvas_click(app, platform, surface, target, btn, x, y),
+        Some(SurfaceRole::Canvas) | Some(SurfaceRole::Strip) => {
+            canvas_click(app, platform, surface, target, btn, x, y)
+        }
         _ => {}
     }
 }
@@ -505,6 +538,7 @@ fn canvas_click(
             } else {
                 app.terminal.switch(i);
                 app.state.focus = PanelFocus::Terminal;
+                app.bring_terminal_forward(platform);
             }
         }
         HitTarget::TerminalTabClose(i) => close_tab(app, i),
@@ -513,6 +547,34 @@ fn canvas_click(
                 tracing::warn!("new tab: {e:#}");
             }
             app.state.focus = PanelFocus::Terminal;
+            app.bring_terminal_forward(platform);
+        }
+        HitTarget::AppTab(i) => {
+            if let Some(win) = app.state.windows.get(i).cloned() {
+                if btn == button::MIDDLE {
+                    window_action(app, &win.address, WindowAction::Close);
+                } else if win.minimized {
+                    window_action(app, &win.address, WindowAction::Restore);
+                } else {
+                    window_action(app, &win.address, WindowAction::Focus);
+                }
+            }
+        }
+        HitTarget::AppTabClose(i) => {
+            if let Some(win) = app.state.windows.get(i).cloned() {
+                window_action(app, &win.address, WindowAction::Close);
+            }
+        }
+        HitTarget::WindowMinimize | HitTarget::WindowMaximize | HitTarget::WindowClose => {
+            let action = match target {
+                HitTarget::WindowMinimize => WindowAction::Minimize,
+                HitTarget::WindowMaximize => WindowAction::ToggleMaximize,
+                _ => WindowAction::Close,
+            };
+            if let Some(win) = app.state.windows.iter().find(|w| w.active && !w.minimized) {
+                let address = win.address.clone();
+                window_action(app, &address, action);
+            }
         }
         HitTarget::FilesystemArea => app.state.focus = PanelFocus::Filesystem,
         HitTarget::FsEntry(i) => {

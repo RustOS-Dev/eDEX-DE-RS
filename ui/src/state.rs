@@ -82,6 +82,20 @@ pub struct WorkspaceInfo {
     pub windows: u32,
 }
 
+/// An application window shown as a tab in the centre panel.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowTab {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    /// Focused window.
+    pub active: bool,
+    /// Parked on the minimized workspace; clicking the tab brings it back.
+    pub minimized: bool,
+    pub maximized: bool,
+    pub floating: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PanelFocus {
     #[default]
@@ -254,6 +268,12 @@ pub struct ShellState {
     pub date: String,
     pub workspaces: Vec<WorkspaceInfo>,
     pub active_window: Option<String>,
+    /// Windows on the visible workspace, then minimized ones (centre panel tabs).
+    pub windows: Vec<WindowTab>,
+    /// Tiled windows cover the terminal on the visible workspace.
+    pub apps_cover_terminal: bool,
+    /// Side panels are not reserved and apps are open: the tab strip spans the full width.
+    pub wide_tab_strip: bool,
     pub kb_layout: String,
     pub hypr_connected: bool,
     pub live_iso: bool,
@@ -292,6 +312,9 @@ impl ShellState {
             date: String::new(),
             workspaces: Vec::new(),
             active_window: None,
+            windows: Vec::new(),
+            apps_cover_terminal: false,
+            wide_tab_strip: false,
             kb_layout: String::from("us"),
             hypr_connected: false,
             live_iso: false,

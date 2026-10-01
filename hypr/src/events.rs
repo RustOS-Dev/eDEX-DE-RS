@@ -22,6 +22,12 @@ pub enum HyprEvent {
         class: String,
         title: String,
     },
+    /// `activewindowv2`: address of the focused window (empty when none).
+    ActiveWindowAddress(String),
+    FloatingMode {
+        address: String,
+        floating: bool,
+    },
     Fullscreen(bool),
     MonitorAdded(String),
     MonitorRemoved(String),
@@ -104,6 +110,14 @@ pub fn parse_line(line: &str) -> Option<HyprEvent> {
             HyprEvent::ActiveWindow {
                 class: f.first().cloned().unwrap_or_default(),
                 title: f.get(1).cloned().unwrap_or_default(),
+            }
+        }
+        "activewindowv2" => HyprEvent::ActiveWindowAddress(data.trim().to_string()),
+        "changefloatingmode" => {
+            let f = fields(2);
+            HyprEvent::FloatingMode {
+                address: f.first().cloned().unwrap_or_default(),
+                floating: f.get(1).is_some_and(|s| s == "1"),
             }
         }
         "fullscreen" => HyprEvent::Fullscreen(data == "1"),
@@ -198,11 +212,10 @@ pub fn parse_line(line: &str) -> Option<HyprEvent> {
             Some(data.to_string())
         }),
         // v2 variants we do not need separately are folded into their v1 handling above.
-        "workspacev1" | "focusedmonv2" | "activewindowv2" | "monitoraddedv2"
-        | "monitorremovedv2" | "moveworkspacev2" | "movewindowv2" | "activespecial"
-        | "activespecialv2" | "changefloatingmode" | "pin" | "minimized" | "screencastv2"
-        | "kill" | "togglegroup" | "moveintogroup" | "moveoutofgroup" | "ignoregrouplock"
-        | "lockgroups" => {
+        "workspacev1" | "focusedmonv2" | "monitoraddedv2" | "monitorremovedv2"
+        | "moveworkspacev2" | "movewindowv2" | "activespecial" | "activespecialv2" | "pin"
+        | "minimized" | "screencastv2" | "kill" | "togglegroup" | "moveintogroup"
+        | "moveoutofgroup" | "ignoregrouplock" | "lockgroups" => {
             return None;
         }
         other => HyprEvent::Other {
@@ -294,6 +307,16 @@ mod tests {
             })
         );
         assert_eq!(parse_line("garbage"), None);
-        assert_eq!(parse_line("activewindowv2>>5f0a"), None);
+        assert_eq!(
+            parse_line("activewindowv2>>5f0a"),
+            Some(HyprEvent::ActiveWindowAddress("5f0a".into()))
+        );
+        assert_eq!(
+            parse_line("changefloatingmode>>5f0a,1"),
+            Some(HyprEvent::FloatingMode {
+                address: "5f0a".into(),
+                floating: true
+            })
+        );
     }
 }

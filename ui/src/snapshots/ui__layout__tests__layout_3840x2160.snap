@@ -41,6 +41,12 @@ PanelLayout {
         w: 3840.0,
         h: 224.0,
     },
+    tab_strip: Rect {
+        x: 776.0,
+        y: 76.0,
+        w: 2211.0,
+        h: 26.0,
+    },
     fs_handle: Rect {
         x: 765.0,
         y: 68.0,

@@ -31,7 +31,7 @@ use ui::{
     layout::PanelLayout,
     overlays::toasts::{required_height, TOAST_W},
     panels::terminal_view,
-    shell::{osd_expired, render_canvas, render_overlay, render_toasts},
+    shell::{osd_expired, render_canvas, render_overlay, render_strip, render_toasts},
     state::OverlayKind,
     theme::{builtin_tron, load_themes},
     ShellState, Theme,
@@ -53,6 +53,8 @@ pub struct OutputShell {
     pub reservers: [SurfaceId; 4],
     pub overlay: Option<SurfaceId>,
     pub toast: Option<SurfaceId>,
+    /// Tab strip bar (Top layer) and the logical rect it currently occupies.
+    pub strip: Option<(SurfaceId, ui::geometry::Rect)>,
     pub layout: Option<PanelLayout>,
     pub size: (u32, u32),
 }
@@ -95,6 +97,8 @@ pub struct App {
     pub hypr: Option<HyprSocket>,
     pub hypr_events: Option<EventStream>,
     pub hypr_state: HyprState,
+    /// Whether each output's side panels are currently reserved (by output name).
+    pub applied_sides: HashMap<String, bool>,
     pub ipc: Option<IpcServer>,
     pub notif_server: Option<NotificationServer>,
     pub store: NotificationStore,
@@ -260,6 +264,7 @@ impl App {
             hypr,
             hypr_events,
             hypr_state,
+            applied_sides: HashMap::new(),
             ipc,
             notif_server,
             store,
@@ -362,7 +367,9 @@ impl App {
             })
             .unwrap_or((1280.0, 720.0));
         let layout = PanelLayout::compute(lw, lh, &self.state.metrics, &self.state.layout_cfg);
-        let zones = self.zones(&layout);
+        let zones = self.zones(&layout, &name);
+        self.applied_sides
+            .insert(name.clone(), self.reserve_sides_on(&name));
         let canvas = match platform.create_layer_surface(LayerSpec::canvas(output)) {
             Ok(id) => id,
             Err(e) => {
@@ -398,6 +405,7 @@ impl App {
             reservers,
             overlay: None,
             toast: None,
+            strip: None,
             layout: Some(layout),
             size: (lw as u32, lh as u32),
         });
@@ -412,6 +420,7 @@ impl App {
             .chain(shell.reservers)
             .chain(shell.overlay)
             .chain(shell.toast)
+            .chain(shell.strip.map(|(id, _)| id))
         {
             platform.destroy_surface(id);
             self.renderers.remove(&id);
@@ -422,13 +431,19 @@ impl App {
         info!(output = %shell.name, "output removed");
     }
 
-    fn zones(&self, layout: &PanelLayout) -> (u32, u32, u32, u32) {
+    fn zones(&self, layout: &PanelLayout, output: &str) -> (u32, u32, u32, u32) {
         let (t, b, l, r) = layout.reserved_zones();
-        if self.config.layout.reserve_side_panels {
+        if self.reserve_sides_on(output) {
             (t, b, l, r)
         } else {
             (t, b, 0, 0)
         }
+    }
+
+    /// Side panels keep their space unless the user hid them or a maximized window on this
+    /// output's workspace wants the full width.
+    pub fn reserve_sides_on(&self, output: &str) -> bool {
+        self.config.layout.reserve_side_panels && !self.hypr_state.maximized_on(output)
     }
 
     pub fn primary(&self) -> Option<&OutputShell> {
@@ -440,6 +455,7 @@ impl App {
             o.canvas == id
                 || o.overlay == Some(id)
                 || o.toast == Some(id)
+                || o.strip.is_some_and(|(s, _)| s == id)
                 || o.reservers.contains(&id)
         })
     }
@@ -448,9 +464,20 @@ impl App {
     pub fn relayout(&mut self, platform: &mut Platform<AppEvent>) {
         let metrics = self.state.metrics;
         let cfg = self.state.layout_cfg;
-        let reserve_sides = self.config.layout.reserve_side_panels;
+        let sides: Vec<bool> = self
+            .outputs
+            .iter()
+            .map(|o| self.reserve_sides_on(&o.name))
+            .collect();
+        self.applied_sides = self
+            .outputs
+            .iter()
+            .zip(&sides)
+            .map(|(o, s)| (o.name.clone(), *s))
+            .collect();
         let mut primary_grid = None;
         for (i, shell) in self.outputs.iter_mut().enumerate() {
+            let reserve_sides = sides[i];
             let (w, h) = platform.logical_size(shell.canvas).unwrap_or(shell.size);
             shell.size = (w, h);
             let layout = PanelLayout::compute(w as f32, h as f32, &metrics, &cfg);
@@ -475,6 +502,8 @@ impl App {
                     .resize(cols, rows, metrics.cell_w, metrics.cell_h);
             }
         }
+        self.update_hypr_view();
+        self.sync_strip_surfaces(platform);
     }
 
     pub fn mark_all_dirty(&mut self) {
@@ -492,6 +521,51 @@ impl App {
     pub fn mark_canvas_dirty(&mut self) {
         for shell in &self.outputs {
             self.dirty.insert(shell.canvas);
+            if let Some((id, _)) = shell.strip {
+                self.dirty.insert(id);
+            }
+        }
+    }
+
+    /// Create or move each output's tab strip surface to cover its strip (full width on the
+    /// primary output while apps have the side panels' space).
+    pub fn sync_strip_surfaces(&mut self, platform: &mut Platform<AppEvent>) {
+        let wide = self.state.wide_tab_strip;
+        for (i, shell) in self.outputs.iter_mut().enumerate() {
+            let Some(layout) = shell.layout.as_ref() else {
+                continue;
+            };
+            let rect = if wide && i == 0 {
+                ui::layout::wide_tab_strip(layout)
+            } else {
+                layout.tab_strip
+            };
+            let (x, y) = (rect.x.round() as i32, rect.y.round() as i32);
+            let (w, h) = (
+                rect.w.round().max(1.0) as u32,
+                rect.h.round().max(1.0) as u32,
+            );
+            match shell.strip {
+                Some((id, old)) if old == rect => {
+                    self.dirty.insert(id);
+                }
+                Some((id, _)) => {
+                    platform.set_layer_margin(id, (y, 0, 0, x));
+                    platform.set_layer_size(id, w, h);
+                    shell.strip = Some((id, rect));
+                    self.dirty.insert(id);
+                }
+                None => {
+                    match platform.create_layer_surface(LayerSpec::strip(shell.output, x, y, w, h))
+                    {
+                        Ok(id) => {
+                            shell.strip = Some((id, rect));
+                            self.dirty.insert(id);
+                        }
+                        Err(e) => warn!("cannot create the tab strip surface: {e:#}"),
+                    }
+                }
+            }
         }
     }
 
@@ -602,7 +676,7 @@ impl App {
         let top = self.outputs[idx]
             .layout
             .as_ref()
-            .map(|l| l.reserved_zones().0 as i32 + 8)
+            .map(|l| l.top_bar.bottom().round() as i32 + 8)
             .unwrap_or(48);
         // Destroy toast surfaces on other outputs.
         for (i, shell) in self.outputs.iter_mut().enumerate() {
@@ -704,6 +778,11 @@ impl App {
             }
             SurfaceRole::Overlay => render_overlay(&self.state, wf, hf),
             SurfaceRole::Toast => render_toasts(&self.state, wf, hf),
+            SurfaceRole::Strip => {
+                self.state.terminal.tabs = self.terminal.tab_infos();
+                self.state.terminal.active = self.terminal.active_index();
+                Some(render_strip(&self.state, wf, hf))
+            }
             SurfaceRole::Reserver(_) | SurfaceRole::Window => None,
         };
         let Some(rendered) = rendered else {
@@ -741,6 +820,29 @@ impl App {
                 if let Err(e) = h.focus_empty_workspace() {
                     warn!("switching to an empty workspace: {e:#}");
                 }
+            }
+        }
+        if let Some(canvas) = self.primary().map(|s| s.canvas) {
+            if self.focus_surface != Some(canvas) {
+                platform.grab_keyboard(canvas);
+                self.focus_grab = Some(canvas);
+            }
+        }
+    }
+
+    /// Show the terminal in the centre: windows tiled over it are minimized into tabs (click a
+    /// tab to bring one back), then the shell takes keyboard focus.
+    pub fn bring_terminal_forward(&mut self, platform: &mut Platform<AppEvent>) {
+        if self.state.apps_cover_terminal {
+            let covering: Vec<String> = self
+                .state
+                .windows
+                .iter()
+                .filter(|w| !w.minimized && !w.floating)
+                .map(|w| w.address.clone())
+                .collect();
+            for address in covering {
+                crate::input::window_action(self, &address, crate::input::WindowAction::Minimize);
             }
         }
         if let Some(canvas) = self.primary().map(|s| s.canvas) {
@@ -885,6 +987,11 @@ impl App {
             .active_window
             .as_ref()
             .map(|(_, t)| t.clone());
+        self.state.windows = self.hypr_state.window_tabs();
+        let primary = self.primary().map(|o| o.name.clone()).unwrap_or_default();
+        let tiled = self.hypr_state.tiled_on(&primary);
+        self.state.apps_cover_terminal = tiled;
+        self.state.wide_tab_strip = tiled && !self.reserve_sides_on(&primary);
         if self.hypr_state.connected {
             self.state.kb_layout = self.hypr_state.short_layout();
         } else {
@@ -893,7 +1000,7 @@ impl App {
         self.mark_canvas_dirty();
     }
 
-    pub fn drain_hypr(&mut self) {
+    pub fn drain_hypr(&mut self, platform: &mut Platform<AppEvent>) {
         let Some(stream) = self.hypr_events.as_mut() else {
             return;
         };
@@ -925,6 +1032,16 @@ impl App {
         }
         if !events.is_empty() {
             self.update_hypr_view();
+            // A window was maximized or restored: give it (or take back) the side panels' space.
+            let changed = self
+                .outputs
+                .iter()
+                .any(|o| self.applied_sides.get(&o.name) != Some(&self.reserve_sides_on(&o.name)));
+            if changed {
+                self.relayout(platform);
+            } else {
+                self.sync_strip_surfaces(platform);
+            }
         }
     }
 
@@ -1185,7 +1302,7 @@ impl App {
             }
             AppEvent::Notify(ev) => crate::status::notification_event(self, platform, ev),
             AppEvent::Sys(reply) => crate::status::system_reply(self, platform, reply),
-            AppEvent::HyprReadable => self.drain_hypr(),
+            AppEvent::HyprReadable => self.drain_hypr(platform),
             AppEvent::IpcReadable => crate::ipc_handler::drain(self, platform),
             AppEvent::Tick(t) => self.handle_tick(platform, t),
         }

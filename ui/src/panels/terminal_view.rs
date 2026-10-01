@@ -9,48 +9,68 @@ use crate::{
     widgets::Ctx,
 };
 
-/// Height of the tab bar for the given metrics.
-pub fn tab_bar_height(line: f32) -> f32 {
-    (line * 1.3).round()
-}
+pub use crate::layout::tab_bar_height;
+use crate::layout::PANEL_INSET;
 
 /// The rectangle the grid is drawn into (used to size the PTY).
 pub fn grid_rect(panel: Rect, line: f32) -> Rect {
-    panel.inset(8.0).below(tab_bar_height(line))
+    panel.inset(PANEL_INSET).below(tab_bar_height(line))
 }
 
 pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
     let focused = state.focus == PanelFocus::Terminal && state.shell_focused;
     ctx.frame(rect, None);
     ctx.hits.push(rect, HitTarget::TerminalArea);
-    let line = ctx.line();
-    let tab_h = tab_bar_height(line);
-    let inner = rect.inset(8.0);
-    let tabs = Rect::new(inner.x, inner.y, inner.w, tab_h);
-    draw_tabs(ctx, tabs, state, focused);
-    let grid = inner.below(tab_h);
-    draw_grid(ctx, grid, state, focused);
+    let grid = rect.inset(PANEL_INSET).below(tab_bar_height(ctx.line()));
+    if state.apps_cover_terminal {
+        // Hidden behind application windows; drawing it would only show through the gaps.
+        ctx.scene.fill(grid, ctx.theme.terminal_bg);
+    } else {
+        draw_grid(ctx, grid, state, focused);
+    }
 }
 
-fn draw_tabs(ctx: &mut Ctx, rect: Rect, state: &ShellState, focused: bool) {
+/// Width of the window-control buttons at the right end of the strip.
+fn control_w(h: f32) -> f32 {
+    (h * 1.25).round()
+}
+
+/// The centre tab strip: terminal tabs, `+`, application windows (minimized ones dimmed), and
+/// minimize / maximize / close for the focused window. Drawn on its own surface above windows.
+pub fn draw_tab_strip(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
     let t = ctx.theme;
     let size = ctx.small();
     let line = ctx.line();
     let cw = ctx.metrics.cell_w * 0.9;
+    let focused = state.focus == PanelFocus::Terminal && state.shell_focused;
+    let active_app = state.windows.iter().position(|w| w.active && !w.minimized);
+    let controls = if active_app.is_some() {
+        control_w(rect.h) * 3.0 + 6.0
+    } else {
+        0.0
+    };
+    let limit = rect.right() - controls;
+    let label_w = |chars: usize| ((chars.min(24) as f32) * cw).round() + 34.0;
+    let n_tabs = state.terminal.tabs.len() + state.windows.len();
+    // Shrink tabs evenly when they do not all fit at their natural width.
+    let fair = ((limit - rect.x - 34.0 - 8.0) / n_tabs.max(1) as f32 - 4.0).max(56.0);
+    let text_mid = |r: Rect| Rect::new(r.x + 6.0, r.y + (r.h - line) / 2.0, r.w - 26.0, line);
     let mut x = rect.x;
-    let title_w = |title: &str| ((title.chars().count().min(24) as f32) * cw).round() + 34.0;
+
+    let apps_in_front = state.apps_cover_terminal && active_app.is_some();
     for (i, tab) in state.terminal.tabs.iter().enumerate() {
-        let label: String = format!(
+        let label = format!(
             "{} {}",
             i + 1,
             tab.title.chars().take(24).collect::<String>()
         );
-        let w = title_w(&label).min(rect.w * 0.4);
-        if x + w > rect.right() - 30.0 {
+        let w = label_w(label.chars().count()).min(fair);
+        if x + w > limit - 30.0 {
             break;
         }
         let r = Rect::new(x, rect.y, w, rect.h - 2.0);
-        let (fill, fg) = if tab.active {
+        let selected = tab.active && !apps_in_front;
+        let (fill, fg) = if selected {
             (
                 with_alpha(t.border, if focused { 0.3 } else { 0.18 }),
                 t.text_primary,
@@ -59,28 +79,15 @@ fn draw_tabs(ctx: &mut Ctx, rect: Rect, state: &ShellState, focused: bool) {
             (with_alpha(t.border, 0.06), t.text_secondary)
         };
         ctx.scene.fill(r, fill);
-        if tab.active {
+        if selected {
             ctx.scene
                 .fill(Rect::new(r.x, r.bottom() - 2.0, r.w, 2.0), t.border);
         }
         let fg = if tab.exited { t.text_dim } else { fg };
-        ctx.scene.text_aligned(
-            Rect::new(r.x + 6.0, r.y + (r.h - line) / 2.0, r.w - 26.0, line),
-            size,
-            fg,
-            Align::Left,
-            label,
-        );
+        ctx.scene
+            .text_aligned(text_mid(r), size, fg, Align::Left, label);
         ctx.hits.push(r, HitTarget::TerminalTab(i));
-        let close = Rect::new(r.right() - 20.0, r.y, 18.0, r.h);
-        ctx.scene.text_aligned(
-            Rect::new(close.x, close.y + (close.h - line) / 2.0, close.w, line),
-            size,
-            t.text_dim,
-            Align::Center,
-            "×",
-        );
-        ctx.hits.push(close, HitTarget::TerminalTabClose(i));
+        close_mark(ctx, r, HitTarget::TerminalTabClose(i));
         x += w + 4.0;
     }
     let plus = Rect::new(x, rect.y, 26.0, rect.h - 2.0);
@@ -93,6 +100,49 @@ fn draw_tabs(ctx: &mut Ctx, rect: Rect, state: &ShellState, focused: bool) {
         "+",
     );
     ctx.hits.push(plus, HitTarget::TerminalNewTab);
+    x += 26.0 + 4.0;
+
+    if !state.windows.is_empty() {
+        ctx.scene.fill(
+            Rect::new(x, rect.y + 4.0, 1.0, rect.h - 10.0),
+            with_alpha(t.border, 0.5),
+        );
+        x += 5.0;
+    }
+    for (i, win) in state.windows.iter().enumerate() {
+        let name = if win.title.trim().is_empty() {
+            &win.class
+        } else {
+            &win.title
+        };
+        let mark = if win.minimized { "▾ " } else { "" };
+        let label = format!("{mark}{}", name.chars().take(22).collect::<String>());
+        let w = label_w(label.chars().count()).min(fair);
+        if x + w > limit {
+            break;
+        }
+        let r = Rect::new(x, rect.y, w, rect.h - 2.0);
+        let (fill, fg) = if win.active {
+            (with_alpha(t.accent, 0.22), t.text_primary)
+        } else if win.minimized {
+            ([0.0; 4], t.text_dim)
+        } else {
+            (with_alpha(t.accent, 0.07), t.text_secondary)
+        };
+        ctx.scene.fill(r, fill);
+        if win.minimized {
+            ctx.scene.stroke(r, with_alpha(t.text_dim, 0.5), 1.0);
+        }
+        if win.active {
+            ctx.scene
+                .fill(Rect::new(r.x, r.bottom() - 2.0, r.w, 2.0), t.accent);
+        }
+        ctx.scene
+            .text_aligned(text_mid(r), size, fg, Align::Left, label);
+        ctx.hits.push(r, HitTarget::AppTab(i));
+        close_mark(ctx, r, HitTarget::AppTabClose(i));
+        x += w + 4.0;
+    }
     ctx.scene.hline(
         rect.x,
         rect.bottom() - 1.0,
@@ -100,25 +150,75 @@ fn draw_tabs(ctx: &mut Ctx, rect: Rect, state: &ShellState, focused: bool) {
         with_alpha(t.border, 0.35),
     );
 
-    // Right side: scrollback indicator / focus hint
+    if let Some(i) = active_app {
+        let bw = control_w(rect.h);
+        let maximized = state.windows[i].maximized;
+        let buttons = [
+            ("↓", HitTarget::WindowMinimize, t.text_secondary),
+            (
+                "□",
+                HitTarget::WindowMaximize,
+                if maximized {
+                    t.accent
+                } else {
+                    t.text_secondary
+                },
+            ),
+            ("×", HitTarget::WindowClose, t.error),
+        ];
+        let mut bx = rect.right() - bw * 3.0;
+        for (glyph, target, color) in buttons {
+            let r = Rect::new(bx, rect.y, bw - 2.0, rect.h - 2.0);
+            ctx.scene.fill(r, with_alpha(color, 0.12));
+            ctx.scene.stroke(r, with_alpha(color, 0.6), 1.0);
+            ctx.scene.text_aligned(
+                Rect::new(r.x, r.y + (r.h - line) / 2.0, r.w, line),
+                size,
+                color,
+                Align::Center,
+                glyph,
+            );
+            ctx.hits.push(r, target);
+            bx += bw;
+        }
+        return;
+    }
+
+    // No app focused: scrollback indicator / focus hint on the right.
     let frame = &state.terminal.frame;
     let hint = if frame.display_offset > 0 {
         format!("↑ {} lines", frame.display_offset)
-    } else if !focused {
+    } else if !focused && !state.apps_cover_terminal {
         "click to focus".to_string()
     } else {
         String::new()
     };
     if !hint.is_empty() {
         let w = (hint.chars().count() as f32 * cw).round() + 8.0;
-        ctx.scene.text_aligned(
-            Rect::new(rect.right() - w, rect.y + (rect.h - line) / 2.0, w, line),
-            size,
-            t.text_dim,
-            Align::Right,
-            hint,
-        );
+        if rect.right() - w > x {
+            ctx.scene.text_aligned(
+                Rect::new(rect.right() - w, rect.y + (rect.h - line) / 2.0, w, line),
+                size,
+                t.text_dim,
+                Align::Right,
+                hint,
+            );
+        }
     }
+}
+
+/// The small × at the right end of a tab.
+fn close_mark(ctx: &mut Ctx, tab: Rect, target: HitTarget) {
+    let line = ctx.line();
+    let close = Rect::new(tab.right() - 20.0, tab.y, 18.0, tab.h);
+    ctx.scene.text_aligned(
+        Rect::new(close.x, close.y + (close.h - line) / 2.0, close.w, line),
+        ctx.small(),
+        ctx.theme.text_dim,
+        Align::Center,
+        "×",
+    );
+    ctx.hits.push(close, target);
 }
 
 fn draw_grid(ctx: &mut Ctx, rect: Rect, state: &ShellState, focused: bool) {

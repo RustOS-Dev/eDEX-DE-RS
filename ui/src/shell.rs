@@ -33,11 +33,20 @@ pub fn render_canvas(state: &ShellState, width: f32, height: f32) -> (Rendered, 
         };
         panels::statusbar::draw(&mut ctx, layout.status_bar, state);
         panels::topbar::draw(&mut ctx, layout.top_bar, state);
-        panels::filesystem_view::draw(&mut ctx, layout.filesystem, state);
-        panels::terminal_view::draw(&mut ctx, layout.terminal, state);
-        panels::sysinfo::draw(&mut ctx, layout.sysinfo, state);
+        // With the side panels given to applications they are entirely under windows; skip them
+        // (text is composited above all fills, so it would show through the strip).
+        if !state.wide_tab_strip {
+            panels::filesystem_view::draw(&mut ctx, layout.filesystem, state);
+        }
+        if !state.wide_tab_strip {
+            panels::terminal_view::draw(&mut ctx, layout.terminal, state);
+            panels::sysinfo::draw(&mut ctx, layout.sysinfo, state);
+        }
         panels::keyboard_view::draw(&mut ctx, layout.keyboard, layout.key_h, state);
-        draw_handles(&mut ctx, &layout, state);
+        // The tab strip itself is drawn on its own Top-layer surface (`render_strip`).
+        if !state.wide_tab_strip {
+            draw_handles(&mut ctx, &layout, state);
+        }
         if !state.boot.done {
             draw_boot(&mut ctx, Rect::new(0.0, 0.0, width, height), state);
         }
@@ -110,6 +119,23 @@ fn draw_boot(ctx: &mut Ctx, screen: Rect, state: &ShellState) {
         Align::Center,
         format!("eDEX-DE {}  //  press any key to skip", state.version),
     );
+}
+
+/// Build the tab strip surface (`width` × `height` logical pixels, placed over the strip).
+pub fn render_strip(state: &ShellState, width: f32, height: f32) -> Rendered {
+    let mut scene = Scene::new(width, height, state.theme.panel_bg);
+    let mut hits = HitMap::default();
+    {
+        let mut ctx = Ctx {
+            scene: &mut scene,
+            hits: &mut hits,
+            theme: &state.theme,
+            metrics: &state.metrics,
+            pulse: state.pulse(),
+        };
+        panels::terminal_view::draw_tab_strip(&mut ctx, Rect::new(0.0, 0.0, width, height), state);
+    }
+    Rendered { scene, hits }
 }
 
 /// Build the overlay surface contents, if an overlay is open.

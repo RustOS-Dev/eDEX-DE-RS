@@ -151,6 +151,22 @@ impl LayerSpec {
         }
     }
 
+    /// Bar at logical position (x, y) with the given size, above windows.
+    pub fn strip(output: OutputId, x: i32, y: i32, width: u32, height: u32) -> Self {
+        Self {
+            role: SurfaceRole::Strip,
+            output: Some(output),
+            layer: Layer::Top,
+            anchor: Anchor::TOP | Anchor::LEFT,
+            size: (width.max(1), height.max(1)),
+            exclusive_zone: -1,
+            keyboard: KeyboardInteractivity::None,
+            namespace: "edex-de:strip".into(),
+            accepts_input: true,
+            margin: (y, 0, 0, x),
+        }
+    }
+
     pub fn reserver(output: OutputId, edge: Edge, size: u32) -> Self {
         let (anchor, dims, ns) = match edge {
             Edge::Top => (
@@ -613,6 +629,16 @@ impl<E: 'static> Platform<E> {
         if let Some(entry) = self.surfaces.get_mut(&id) {
             if let SurfaceKind::Layer(layer) = &entry.kind {
                 layer.set_size(width, height);
+                layer.commit();
+            }
+        }
+    }
+
+    /// Move a layer surface: margins (top, right, bottom, left) from its anchored edges.
+    pub fn set_layer_margin(&mut self, id: SurfaceId, margin: (i32, i32, i32, i32)) {
+        if let Some(entry) = self.surfaces.get_mut(&id) {
+            if let SurfaceKind::Layer(layer) = &entry.kind {
+                layer.set_margin(margin.0, margin.1, margin.2, margin.3);
                 layer.commit();
             }
         }

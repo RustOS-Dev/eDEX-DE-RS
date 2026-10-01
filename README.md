@@ -85,6 +85,20 @@ greetd (tty1) → cage -s -- edex-greeter → edex-session → start-hyprland
 
 `edex-de.service` is a user unit with `Restart=on-failure`, so a shell crash never ends the session.
 
+## Windows and the centre tab strip
+
+Applications tile into the centre panel, below its tab strip, which always stays visible. The strip
+holds the terminal tabs, a tab for every window on the current workspace and one for every
+minimized window. The focused window gets three controls at the right end of the strip:
+
+* **↓** minimizes it into a tab (click the tab to bring it back),
+* **□** maximizes it: it takes the full width while the side panels step aside; click again to
+  restore,
+* **×** closes it.
+
+Clicking a terminal tab (or `+`) while apps cover the terminal minimizes them into tabs and shows
+the terminal. Middle-click a window tab to close it.
+
 ## Keyboard shortcuts
 
 Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/user.lua`):
@@ -98,8 +112,11 @@ Hyprland binds (from `share/hypr/edex/binds.lua`, editable in `~/.config/hypr/us
 | `SUPER+Escape` | Power menu |
 | `SUPER+Return` / `SUPER+F1` | Focus the eDEX terminal / file panel |
 | `SUPER+Shift+Return`, `SUPER+E` | kitty, file manager |
-| `SUPER+Q`, `SUPER+F`, `SUPER+V`, `SUPER+M` | Close, fullscreen, float, maximize |
-| `SUPER+SHIFT+F` | Hide / show the side panels (apps use the full width; the top bar stays) |
+| `SUPER+Q`, `SUPER+V` | Close, float the focused window |
+| `SUPER+M` | Minimize the focused window into a tab in the centre panel |
+| `SUPER+F` | Maximize: full width, side panels hidden, top bar and window controls stay |
+| `SUPER+SHIFT+F` | True fullscreen over everything |
+| `SUPER+CTRL+F` | Hide / show the side panels for all apps |
 | `SUPER+H/J/K/L`, `SUPER+Shift+…`, `SUPER+Ctrl+…` | Focus, move, resize |
 | `SUPER+1..0`, `SUPER+Shift+1..0` | Switch / move to workspace |
 | `SUPER+S` | Scratchpad |

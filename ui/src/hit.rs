@@ -31,6 +31,13 @@ pub enum HitTarget {
     TerminalTab(usize),
     TerminalTabClose(usize),
     TerminalNewTab,
+    /// Application window tab in the centre strip (index into `ShellState::windows`).
+    AppTab(usize),
+    AppTabClose(usize),
+    /// Controls for the focused application window.
+    WindowMinimize,
+    WindowMaximize,
+    WindowClose,
     FilesystemArea,
     FsEntry(usize),
     FsBreadcrumb(usize),

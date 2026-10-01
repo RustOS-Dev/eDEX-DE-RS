@@ -51,6 +51,23 @@ impl Default for LayoutConfig {
 pub const KEYBOARD_ROWS: usize = 5;
 pub const KEY_GAP: f32 = 6.0;
 pub const KEYBOARD_PAD: f32 = 10.0;
+/// Padding inside the terminal panel frame.
+pub const PANEL_INSET: f32 = 8.0;
+
+/// Height of the centre panel's tab strip for the given line height.
+pub fn tab_bar_height(line: f32) -> f32 {
+    (line * 1.3).round()
+}
+
+/// The tab strip across the whole width (side panels hidden while apps are open).
+pub fn wide_tab_strip(layout: &PanelLayout) -> Rect {
+    Rect::new(
+        PANEL_INSET,
+        layout.tab_strip.y,
+        (layout.width - PANEL_INSET * 2.0).max(0.0),
+        layout.tab_strip.h,
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelLayout {
@@ -62,6 +79,9 @@ pub struct PanelLayout {
     pub terminal: Rect,
     pub sysinfo: Rect,
     pub keyboard: Rect,
+    /// Tab strip at the top of the terminal panel (terminal tabs, app windows, window
+    /// controls). It stays above application windows: the top reservation ends below it.
+    pub tab_strip: Rect,
     pub fs_handle: Rect,
     pub sysinfo_handle: Rect,
     /// Height of one keyboard key.
@@ -96,13 +116,17 @@ impl PanelLayout {
             .clamp(min_sys_x, max_sys_x);
 
         let handle_w = 6.0;
+        let terminal = Rect::new(fs_w, panel_y, (sys_x - fs_w).max(0.0), panel_h);
+        let strip = terminal.inset(PANEL_INSET);
+        let tab_strip = Rect::new(strip.x, strip.y, strip.w, tab_bar_height(metrics.line));
         Self {
             width,
             height,
             status_bar: Rect::new(0.0, 0.0, width, status_h),
             top_bar: Rect::new(0.0, status_h, width, top_h),
             filesystem: Rect::new(0.0, panel_y, fs_w, panel_h),
-            terminal: Rect::new(fs_w, panel_y, (sys_x - fs_w).max(0.0), panel_h),
+            terminal,
+            tab_strip,
             sysinfo: Rect::new(sys_x, panel_y, (width - sys_x).max(0.0), panel_h),
             keyboard: Rect::new(0.0, height - keyboard_h, width, keyboard_h),
             fs_handle: Rect::new(fs_w - handle_w / 2.0, panel_y, handle_w, panel_h),
@@ -111,10 +135,11 @@ impl PanelLayout {
         }
     }
 
-    /// Exclusive zones (top, bottom, left, right) the reservers should claim.
+    /// Exclusive zones (top, bottom, left, right) the reservers should claim. The top zone
+    /// includes the tab strip so application windows never cover it.
     pub fn reserved_zones(&self) -> (u32, u32, u32, u32) {
         (
-            (self.status_bar.h + self.top_bar.h).round() as u32,
+            self.tab_strip.bottom().round() as u32,
             self.keyboard.h.round() as u32,
             self.filesystem.w.round() as u32,
             self.sysinfo.w.round() as u32,
@@ -123,7 +148,7 @@ impl PanelLayout {
 
     /// Terminal grid dimensions that fit the terminal panel's content area.
     pub fn terminal_grid(&self, metrics: &Metrics, tab_bar_h: f32) -> (usize, usize) {
-        let inner = self.terminal.inset(8.0).below(tab_bar_h);
+        let inner = self.terminal.inset(PANEL_INSET).below(tab_bar_h);
         let cols = (inner.w / metrics.cell_w).floor().max(20.0) as usize;
         let rows = (inner.h / metrics.cell_h).floor().max(5.0) as usize;
         (cols, rows)
@@ -170,7 +195,8 @@ mod tests {
         assert_eq!(l.filesystem.y, l.status_bar.h + l.top_bar.h);
         assert_eq!(l.filesystem.bottom(), l.keyboard.y);
         let (top, bottom, left, right) = l.reserved_zones();
-        assert_eq!(top as f32, l.status_bar.h + l.top_bar.h);
+        assert_eq!(top as f32, l.tab_strip.bottom());
+        assert!(l.tab_strip.y > l.top_bar.bottom());
         assert_eq!(bottom as f32, l.keyboard.h);
         assert_eq!(left as f32, l.filesystem.w);
         assert_eq!(right as f32, l.sysinfo.w);
