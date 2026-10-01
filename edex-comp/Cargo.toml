@@ -14,7 +14,10 @@ path = "src/main.rs"
 [dependencies]
 comp-proto = { path = "../comp-proto" }
 settings = { path = "../settings" }
+ui = { path = "../ui" }
 anyhow = { workspace = true }
+calloop = { workspace = true }
+ipc = { path = "../ipc" }
 bitflags = "2"
 clap = { workspace = true }
 libc = { workspace = true }

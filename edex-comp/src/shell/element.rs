@@ -1,9 +1,11 @@
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, cell::RefCell, time::Duration};
 
 use smithay::{
     backend::renderer::{
         element::{
-            solid::SolidColorRenderElement, surface::WaylandSurfaceRenderElement, AsRenderElements,
+            solid::{SolidColorBuffer, SolidColorRenderElement},
+            surface::WaylandSurfaceRenderElement,
+            AsRenderElements, Kind,
         },
         ImportAll, ImportMem, Renderer, Texture,
     },
@@ -11,30 +13,19 @@ use smithay::{
         space::SpaceElement, utils::OutputPresentationFeedback, Window, WindowSurface,
         WindowSurfaceType,
     },
-    input::{
-        pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerTarget, RelativeMotionEvent,
-        },
-        touch::TouchTarget,
-        Seat,
-    },
     output::Output,
     reexports::{
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::protocol::wl_surface::WlSurface,
     },
     render_elements,
-    utils::{user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial},
+    utils::{user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale},
     wayland::{
         compositor::SurfaceData as WlSurfaceData, dmabuf::DmabufFeedback, seat::WaylandFocus,
     },
 };
 
-use super::ssd::HEADER_BAR_HEIGHT;
-use crate::{focus::PointerFocusTarget, state::Backend, AnvilState};
+use crate::focus::PointerFocusTarget;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowElement(pub Window);
@@ -45,28 +36,34 @@ impl WindowElement {
         location: Point<f64, Logical>,
         window_type: WindowSurfaceType,
     ) -> Option<(PointerFocusTarget, Point<i32, Logical>)> {
-        let state = self.decoration_state();
-        if state.is_ssd && location.y < HEADER_BAR_HEIGHT as f64 {
-            return Some((PointerFocusTarget::SSD(SSD(self.clone())), Point::default()));
-        }
-        let offset = if state.is_ssd {
-            Point::from((0, HEADER_BAR_HEIGHT))
-        } else {
-            Point::default()
-        };
-
-        let surface_under = self
-            .0
-            .surface_under(location - offset.to_f64(), window_type);
-        let (under, loc) = match self.0.underlying_surface() {
+        let surface_under = self.0.surface_under(location, window_type);
+        match self.0.underlying_surface() {
             WindowSurface::Wayland(_) => {
                 surface_under.map(|(surface, loc)| (PointerFocusTarget::WlSurface(surface), loc))
             }
             WindowSurface::X11(s) => {
                 surface_under.map(|(_, loc)| (PointerFocusTarget::X11Surface(s.clone()), loc))
             }
-        }?;
-        Some((under, loc + offset))
+        }
+    }
+
+    /// Set the focus border drawn around the window (`width` 0 = none).
+    pub fn set_border(&self, width: i32, color: [f32; 4]) {
+        let data = self.user_data();
+        data.insert_if_missing(|| RefCell::new(Border::default()));
+        let mut b = data.get::<RefCell<Border>>().unwrap().borrow_mut();
+        b.width = width.max(0);
+        b.color = color;
+    }
+
+    fn border(&self) -> (i32, [f32; 4]) {
+        self.user_data()
+            .get::<RefCell<Border>>()
+            .map(|b| {
+                let b = b.borrow();
+                (b.width, b.color)
+            })
+            .unwrap_or((0, [0.0; 4]))
     }
 
     pub fn with_surfaces<F>(&self, processor: F)
@@ -147,245 +144,25 @@ impl IsAlive for WindowElement {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SSD(WindowElement);
-
-impl IsAlive for SSD {
-    #[inline]
-    fn alive(&self) -> bool {
-        self.0.alive()
-    }
-}
-
-impl WaylandFocus for SSD {
-    #[inline]
-    fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
-        self.0.wl_surface()
-    }
-}
-
-impl<BackendData: Backend> PointerTarget<AnvilState<BackendData>> for SSD {
-    fn enter(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        event: &MotionEvent,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.pointer_enter(event.location);
-        }
-    }
-    fn motion(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        event: &MotionEvent,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.pointer_enter(event.location);
-        }
-    }
-    fn relative_motion(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &RelativeMotionEvent,
-    ) {
-    }
-    fn button(
-        &self,
-        seat: &Seat<AnvilState<BackendData>>,
-        data: &mut AnvilState<BackendData>,
-        event: &ButtonEvent,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.clicked(seat, data, &self.0, event.serial);
-        }
-    }
-    fn axis(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _frame: AxisFrame,
-    ) {
-    }
-    fn frame(&self, _seat: &Seat<AnvilState<BackendData>>, _data: &mut AnvilState<BackendData>) {}
-    fn leave(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _serial: Serial,
-        _time: u32,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.pointer_leave();
-        }
-    }
-    fn gesture_swipe_begin(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GestureSwipeBeginEvent,
-    ) {
-    }
-    fn gesture_swipe_update(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GestureSwipeUpdateEvent,
-    ) {
-    }
-    fn gesture_swipe_end(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GestureSwipeEndEvent,
-    ) {
-    }
-    fn gesture_pinch_begin(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GesturePinchBeginEvent,
-    ) {
-    }
-    fn gesture_pinch_update(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GesturePinchUpdateEvent,
-    ) {
-    }
-    fn gesture_pinch_end(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GesturePinchEndEvent,
-    ) {
-    }
-    fn gesture_hold_begin(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GestureHoldBeginEvent,
-    ) {
-    }
-    fn gesture_hold_end(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &GestureHoldEndEvent,
-    ) {
-    }
-}
-
-impl<BackendData: Backend> TouchTarget<AnvilState<BackendData>> for SSD {
-    fn down(
-        &self,
-        seat: &Seat<AnvilState<BackendData>>,
-        data: &mut AnvilState<BackendData>,
-        event: &smithay::input::touch::DownEvent,
-        _seq: Serial,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.pointer_enter(event.location);
-            state
-                .header_bar
-                .touch_down(seat, data, &self.0, event.serial);
-        }
-    }
-
-    fn up(
-        &self,
-        seat: &Seat<AnvilState<BackendData>>,
-        data: &mut AnvilState<BackendData>,
-        event: &smithay::input::touch::UpEvent,
-        _seq: Serial,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.touch_up(seat, data, &self.0, event.serial);
-        }
-    }
-
-    fn motion(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        event: &smithay::input::touch::MotionEvent,
-        _seq: Serial,
-    ) {
-        let mut state = self.0.decoration_state();
-        if state.is_ssd {
-            state.header_bar.pointer_enter(event.location);
-        }
-    }
-
-    fn frame(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _seq: Serial,
-    ) {
-    }
-
-    fn cancel(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _seq: Serial,
-    ) {
-    }
-
-    fn shape(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &smithay::input::touch::ShapeEvent,
-        _seq: Serial,
-    ) {
-    }
-
-    fn orientation(
-        &self,
-        _seat: &Seat<AnvilState<BackendData>>,
-        _data: &mut AnvilState<BackendData>,
-        _event: &smithay::input::touch::OrientationEvent,
-        _seq: Serial,
-    ) {
-    }
-}
-
 impl SpaceElement for WindowElement {
     fn geometry(&self) -> Rectangle<i32, Logical> {
-        let mut geo = SpaceElement::geometry(&self.0);
-        if self.decoration_state().is_ssd {
-            geo.size.h += HEADER_BAR_HEIGHT;
-        }
-        geo
+        SpaceElement::geometry(&self.0)
     }
     fn bbox(&self) -> Rectangle<i32, Logical> {
         let mut bbox = SpaceElement::bbox(&self.0);
-        if self.decoration_state().is_ssd {
-            bbox.size.h += HEADER_BAR_HEIGHT;
+        let (width, _) = self.border();
+        if width > 0 {
+            let geo = SpaceElement::geometry(&self.0);
+            let outer = Rectangle::new(
+                geo.loc - Point::from((width, width)),
+                (geo.size.w + 2 * width, geo.size.h + 2 * width).into(),
+            );
+            bbox = bbox.merge(outer);
         }
         bbox
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        if self.decoration_state().is_ssd {
-            point.y < HEADER_BAR_HEIGHT as f64
-                || SpaceElement::is_in_input_region(
-                    &self.0,
-                    &(*point - Point::from((0.0, HEADER_BAR_HEIGHT as f64))),
-                )
-        } else {
-            SpaceElement::is_in_input_region(&self.0, point)
-        }
+        SpaceElement::is_in_input_region(&self.0, point)
     }
     fn z_index(&self) -> u8 {
         SpaceElement::z_index(&self.0)
@@ -403,6 +180,15 @@ impl SpaceElement for WindowElement {
     fn refresh(&self) {
         SpaceElement::refresh(&self.0);
     }
+}
+
+/// The four edges of a window's focus border, kept between frames so damage tracking sees
+/// unchanged buffers.
+#[derive(Debug, Default)]
+struct Border {
+    width: i32,
+    color: [f32; 4],
+    buffers: [SolidColorBuffer; 4],
 }
 
 render_elements!(
@@ -431,37 +217,41 @@ where
     fn render_elements<C: From<Self::RenderElement>>(
         &self,
         renderer: &mut R,
-        mut location: Point<i32, Physical>,
+        location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
-        let window_bbox = SpaceElement::bbox(&self.0);
-
-        if self.decoration_state().is_ssd && !window_bbox.is_empty() {
-            let window_geo = SpaceElement::geometry(&self.0);
-
-            let mut state = self.decoration_state();
-            let width = window_geo.size.w;
-            state.header_bar.redraw(width as u32);
-            let mut vec = AsRenderElements::<R>::render_elements::<WindowRenderElement<R>>(
-                &state.header_bar,
-                renderer,
-                location,
-                scale,
-                alpha,
-            );
-
-            location.y += (scale.y * HEADER_BAR_HEIGHT as f64) as i32;
-
-            let window_elements =
-                AsRenderElements::render_elements(&self.0, renderer, location, scale, alpha);
-            vec.extend(window_elements);
-            vec.into_iter().map(C::from).collect()
-        } else {
+        let mut out: Vec<C> =
             AsRenderElements::render_elements(&self.0, renderer, location, scale, alpha)
                 .into_iter()
                 .map(C::from)
-                .collect()
+                .collect();
+        let Some(cell) = self.user_data().get::<RefCell<Border>>() else {
+            return out;
+        };
+        let mut border = cell.borrow_mut();
+        if border.width <= 0 {
+            return out;
         }
+        // `location` is where the window's surface origin lands; the border hugs the window
+        // geometry, which client-side shadows can offset inside the surface.
+        let geo = SpaceElement::geometry(&self.0);
+        let (w, h, b) = (geo.size.w, geo.size.h, border.width);
+        let edges: [(i32, i32, i32, i32); 4] = [
+            (-b, -b, w + 2 * b, b),
+            (-b, h, w + 2 * b, b),
+            (-b, 0, b, h),
+            (w, 0, b, h),
+        ];
+        let color = border.color;
+        for (buffer, (x, y, ew, eh)) in border.buffers.iter_mut().zip(edges) {
+            buffer.update((ew, eh), color);
+            let loc = location
+                + (geo.loc + Point::<i32, Logical>::from((x, y))).to_physical_precise_round(scale);
+            out.push(C::from(WindowRenderElement::Decoration(
+                SolidColorRenderElement::from_buffer(buffer, loc, scale, alpha, Kind::Unspecified),
+            )));
+        }
+        out
     }
 }

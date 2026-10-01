@@ -5,7 +5,26 @@ use std::{
     time::Duration,
 };
 
+use std::path::PathBuf;
+
+use comp_proto::{Snapshot, WindowId};
+use smithay::reexports::calloop::{self, channel::Sender as CalloopSender};
+use smithay::wayland::{
+    foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
+    idle_inhibit::IdleInhibitManagerState,
+    idle_notify::IdleNotifierState,
+    session_lock::SessionLockManagerState,
+    xdg_system_bell::XdgSystemBellState,
+};
 use tracing::{info, warn};
+
+use crate::{
+    config::CompConfig,
+    ipc::ControlServer,
+    lifecycle::{IdleState, LockState},
+    session::Supervisor,
+    wm::Wm,
+};
 
 use smithay::{
     backend::{
@@ -135,13 +154,12 @@ impl ClientData for ClientState {
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
 
-#[derive(Debug)]
-pub struct AnvilState<BackendData: Backend + 'static> {
+pub struct EdexState<BackendData: Backend + 'static> {
     pub backend_data: BackendData,
     pub socket_name: Option<String>,
     pub display_handle: DisplayHandle,
     pub running: Arc<AtomicBool>,
-    pub handle: LoopHandle<'static, AnvilState<BackendData>>,
+    pub handle: LoopHandle<'static, EdexState<BackendData>>,
 
     // desktop
     pub space: Space<WindowElement>,
@@ -154,7 +172,7 @@ pub struct AnvilState<BackendData: Backend + 'static> {
     pub output_manager_state: OutputManagerState,
     pub primary_selection_state: PrimarySelectionState,
     pub data_control_state: DataControlState,
-    pub seat_state: SeatState<AnvilState<BackendData>>,
+    pub seat_state: SeatState<EdexState<BackendData>>,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub shm_state: ShmState,
     pub viewporter_state: ViewporterState,
@@ -175,14 +193,67 @@ pub struct AnvilState<BackendData: Backend + 'static> {
     pub suppressed_keys: Vec<Keysym>,
     pub cursor_status: CursorImageStatus,
     pub seat_name: String,
-    pub seat: Seat<AnvilState<BackendData>>,
+    pub seat: Seat<EdexState<BackendData>>,
     pub clock: Clock<Monotonic>,
-    pub pointer: PointerHandle<AnvilState<BackendData>>,
+    pub pointer: PointerHandle<EdexState<BackendData>>,
 
     pub xwm: Option<X11Wm>,
     pub xdisplay: Option<u32>,
 
     pub show_window_preview: bool,
+
+    // eDEX
+    pub wm: Wm<WindowElement>,
+    pub config: CompConfig,
+    pub config_watcher: Option<settings::ConfigWatcher>,
+    pub control: Option<ControlServer>,
+    pub last_snapshot: Snapshot,
+    pub layout_dirty: bool,
+    pub supervisor: Option<Supervisor>,
+    pub mode: RunMode,
+    pub runtime_dir: PathBuf,
+    pub lock: LockState,
+    pub idle: IdleState,
+    pub keyboard_layout: String,
+    /// Keyboard focus to return to when an overlay layer surface goes away.
+    pub prev_focus: Option<KeyboardFocusTarget>,
+    pub last_regular_focus: Option<KeyboardFocusTarget>,
+    /// A lone modifier pressed with nothing else yet (for tap bindings).
+    pub pending_tap: Option<Keysym>,
+    /// Timer repeating a held volume/brightness binding.
+    pub bind_repeat: Option<calloop::RegistrationToken>,
+    pub msg_tx: CalloopSender<CompMsg>,
+    pub session_lock_state: SessionLockManagerState,
+    pub idle_notifier_state: IdleNotifierState<EdexState<BackendData>>,
+    pub foreign_toplevel_state: ForeignToplevelListState,
+    pub foreign_toplevels: HashMap<WindowId, ForeignToplevelHandle>,
+    pub autostart: Option<Vec<String>>,
+}
+
+/// Whether edex-comp is showing the login screen or running a user's session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunMode {
+    Greeter,
+    Session,
+}
+
+/// Messages from helper threads to the event loop.
+#[derive(Debug)]
+pub enum CompMsg {
+    LoginOk {
+        user: String,
+        session: Option<String>,
+    },
+}
+
+/// How edex-comp was started.
+pub struct InitOptions {
+    pub greeter: bool,
+    /// Config file to read in session mode.
+    pub config: PathBuf,
+    pub runtime_dir: PathBuf,
+    /// Session programs to start instead of the default set (`--run`).
+    pub autostart: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -191,15 +262,15 @@ pub struct DndIcon {
     pub offset: Point<i32, Logical>,
 }
 
-delegate_compositor!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_compositor!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> DataDeviceHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> DataDeviceHandler for EdexState<BackendData> {
     fn data_device_state(&self) -> &DataDeviceState {
         &self.data_device_state
     }
 }
 
-impl<BackendData: Backend> ClientDndGrabHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> ClientDndGrabHandler for EdexState<BackendData> {
     fn started(
         &mut self,
         _source: Option<WlDataSource>,
@@ -226,17 +297,17 @@ impl<BackendData: Backend> ClientDndGrabHandler for AnvilState<BackendData> {
         self.dnd_icon = None;
     }
 }
-impl<BackendData: Backend> ServerDndGrabHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> ServerDndGrabHandler for EdexState<BackendData> {
     fn send(&mut self, _mime_type: String, _fd: OwnedFd, _seat: Seat<Self>) {
         unreachable!("Anvil doesn't do server-side grabs");
     }
 }
-delegate_data_device!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_data_device!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> OutputHandler for AnvilState<BackendData> {}
-delegate_output!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+impl<BackendData: Backend> OutputHandler for EdexState<BackendData> {}
+delegate_output!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> SelectionHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> SelectionHandler for EdexState<BackendData> {
     type SelectionUserData = ();
 
     fn new_selection(
@@ -268,34 +339,34 @@ impl<BackendData: Backend> SelectionHandler for AnvilState<BackendData> {
     }
 }
 
-impl<BackendData: Backend> PrimarySelectionHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> PrimarySelectionHandler for EdexState<BackendData> {
     fn primary_selection_state(&self) -> &PrimarySelectionState {
         &self.primary_selection_state
     }
 }
-delegate_primary_selection!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_primary_selection!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> DataControlHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> DataControlHandler for EdexState<BackendData> {
     fn data_control_state(&self) -> &DataControlState {
         &self.data_control_state
     }
 }
 
-delegate_data_control!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_data_control!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> ShmHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> ShmHandler for EdexState<BackendData> {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
     }
 }
-delegate_shm!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_shm!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> SeatHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> SeatHandler for EdexState<BackendData> {
     type KeyboardFocus = KeyboardFocusTarget;
     type PointerFocus = PointerFocusTarget;
     type TouchFocus = PointerFocusTarget;
 
-    fn seat_state(&mut self) -> &mut SeatState<AnvilState<BackendData>> {
+    fn seat_state(&mut self) -> &mut SeatState<EdexState<BackendData>> {
         &mut self.seat_state
     }
 
@@ -307,6 +378,7 @@ impl<BackendData: Backend> SeatHandler for AnvilState<BackendData> {
         let focus = wl_surface.and_then(|s| dh.get_client(s.id()).ok());
         set_data_device_focus(dh, seat, focus.clone());
         set_primary_focus(dh, seat, focus);
+        self.on_keyboard_focus(target);
     }
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
         self.cursor_status = image;
@@ -316,19 +388,19 @@ impl<BackendData: Backend> SeatHandler for AnvilState<BackendData> {
         self.backend_data.update_led_state(led_state)
     }
 }
-delegate_seat!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_seat!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> TabletSeatHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> TabletSeatHandler for EdexState<BackendData> {
     fn tablet_tool_image(&mut self, _tool: &TabletToolDescriptor, image: CursorImageStatus) {
         // TODO: tablet tools should have their own cursors
         self.cursor_status = image;
     }
 }
-delegate_tablet_manager!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_tablet_manager!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_text_input_manager!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_text_input_manager!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> InputMethodHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> InputMethodHandler for EdexState<BackendData> {
     fn new_popup(&mut self, surface: PopupSurface) {
         if let Err(err) = self.popups.track_popup(PopupKind::from(surface)) {
             warn!("Failed to track popup: {}", err);
@@ -353,9 +425,9 @@ impl<BackendData: Backend> InputMethodHandler for AnvilState<BackendData> {
     }
 }
 
-delegate_input_method_manager!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_input_method_manager!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> KeyboardShortcutsInhibitHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> KeyboardShortcutsInhibitHandler for EdexState<BackendData> {
     fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
         &mut self.keyboard_shortcuts_inhibit_state
     }
@@ -366,15 +438,15 @@ impl<BackendData: Backend> KeyboardShortcutsInhibitHandler for AnvilState<Backen
     }
 }
 
-delegate_keyboard_shortcuts_inhibit!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_keyboard_shortcuts_inhibit!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_virtual_keyboard_manager!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_virtual_keyboard_manager!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_pointer_gestures!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_pointer_gestures!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_relative_pointer!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_relative_pointer!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> PointerConstraintsHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> PointerConstraintsHandler for EdexState<BackendData> {
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
         // XXX region
         let Some(current_focus) = pointer.current_focus() else {
@@ -410,11 +482,11 @@ impl<BackendData: Backend> PointerConstraintsHandler for AnvilState<BackendData>
         }
     }
 }
-delegate_pointer_constraints!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_pointer_constraints!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_viewporter!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_viewporter!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> XdgActivationHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> XdgActivationHandler for EdexState<BackendData> {
     fn activation_state(&mut self) -> &mut XdgActivationState {
         &mut self.xdg_activation_state
     }
@@ -438,39 +510,35 @@ impl<BackendData: Backend> XdgActivationHandler for AnvilState<BackendData> {
         token_data: XdgActivationTokenData,
         surface: WlSurface,
     ) {
+        let Some(id) = self
+            .window_for_surface(&surface)
+            .and_then(|w| self.window_id(&w))
+        else {
+            return;
+        };
         if token_data.timestamp.elapsed().as_secs() < 10 {
-            // Just grant the wish
-            let w = self
-                .space
-                .elements()
-                .find(|window| window.wl_surface().map(|s| *s == surface).unwrap_or(false))
-                .cloned();
-            if let Some(window) = w {
-                self.space.raise_element(&window, true);
-            }
+            self.wm.focus_window(id);
+        } else {
+            self.wm.set_urgent(id, true);
         }
+        self.mark_layout();
     }
 }
-delegate_xdg_activation!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_xdg_activation!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> XdgDecorationHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> XdgDecorationHandler for EdexState<BackendData> {
+    // Windows get no title bars: the shell's tab strip has the window controls.
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         use xdg_decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
-        // Set the default to client side
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(Mode::ClientSide);
+            state.decoration_mode = Some(Mode::ServerSide);
         });
     }
-    fn request_mode(&mut self, toplevel: ToplevelSurface, mode: DecorationMode) {
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
         use xdg_decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
-
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(match mode {
-                DecorationMode::ServerSide => Mode::ServerSide,
-                _ => Mode::ClientSide,
-            });
+            state.decoration_mode = Some(Mode::ServerSide);
         });
-
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }
@@ -478,21 +546,20 @@ impl<BackendData: Backend> XdgDecorationHandler for AnvilState<BackendData> {
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         use xdg_decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
         toplevel.with_pending_state(|state| {
-            state.decoration_mode = Some(Mode::ClientSide);
+            state.decoration_mode = Some(Mode::ServerSide);
         });
-
         if toplevel.is_initial_configure_sent() {
             toplevel.send_pending_configure();
         }
     }
 }
-delegate_xdg_decoration!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_xdg_decoration!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_xdg_shell!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
-delegate_layer_shell!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
-delegate_presentation!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_xdg_shell!(@<BackendData: Backend + 'static> EdexState<BackendData>);
+delegate_layer_shell!(@<BackendData: Backend + 'static> EdexState<BackendData>);
+delegate_presentation!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> FractionalScaleHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> FractionalScaleHandler for EdexState<BackendData> {
     fn new_fractional_scale(
         &mut self,
         surface: smithay::reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -540,9 +607,9 @@ impl<BackendData: Backend> FractionalScaleHandler for AnvilState<BackendData> {
         });
     }
 }
-delegate_fractional_scale!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_fractional_scale!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend + 'static> SecurityContextHandler for AnvilState<BackendData> {
+impl<BackendData: Backend + 'static> SecurityContextHandler for EdexState<BackendData> {
     fn context_created(
         &mut self,
         source: SecurityContextListenerSource,
@@ -564,9 +631,9 @@ impl<BackendData: Backend + 'static> SecurityContextHandler for AnvilState<Backe
             .expect("Failed to init wayland socket source");
     }
 }
-delegate_security_context!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_security_context!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend + 'static> XWaylandKeyboardGrabHandler for AnvilState<BackendData> {
+impl<BackendData: Backend + 'static> XWaylandKeyboardGrabHandler for EdexState<BackendData> {
     fn keyboard_focus_for_xsurface(&self, surface: &WlSurface) -> Option<KeyboardFocusTarget> {
         let elem = self
             .space
@@ -575,30 +642,31 @@ impl<BackendData: Backend + 'static> XWaylandKeyboardGrabHandler for AnvilState<
         Some(KeyboardFocusTarget::Window(elem.0.clone()))
     }
 }
-delegate_xwayland_keyboard_grab!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_xwayland_keyboard_grab!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-delegate_xwayland_shell!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+delegate_xwayland_shell!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend> XdgForeignHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> XdgForeignHandler for EdexState<BackendData> {
     fn xdg_foreign_state(&mut self) -> &mut XdgForeignState {
         &mut self.xdg_foreign_state
     }
 }
-smithay::delegate_xdg_foreign!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+smithay::delegate_xdg_foreign!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-smithay::delegate_single_pixel_buffer!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+smithay::delegate_single_pixel_buffer!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-smithay::delegate_fifo!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+smithay::delegate_fifo!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-smithay::delegate_commit_timing!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
+smithay::delegate_commit_timing!(@<BackendData: Backend + 'static> EdexState<BackendData>);
 
-impl<BackendData: Backend + 'static> AnvilState<BackendData> {
+impl<BackendData: Backend + 'static> EdexState<BackendData> {
     pub fn init(
-        display: Display<AnvilState<BackendData>>,
-        handle: LoopHandle<'static, AnvilState<BackendData>>,
+        display: Display<EdexState<BackendData>>,
+        handle: LoopHandle<'static, EdexState<BackendData>>,
         backend_data: BackendData,
         listen_on_socket: bool,
-    ) -> AnvilState<BackendData> {
+        opts: InitOptions,
+    ) -> EdexState<BackendData> {
         let dh = display.handle();
 
         let clock = Clock::new();
@@ -682,12 +750,63 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
             .expect("Failed to initialize the keyboard");
 
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(&dh);
+        // Only processes edex-comp started may lock the screen.
+        let session_lock_state = SessionLockManagerState::new::<Self, _>(&dh, |_client| true);
+        let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
+        IdleInhibitManagerState::new::<Self>(&dh);
+        XdgSystemBellState::new::<Self>(&dh);
+        let foreign_toplevel_state = ForeignToplevelListState::new::<Self>(&dh);
+
+        let (msg_tx, msg_rx) = calloop::channel::channel::<CompMsg>();
+        handle
+            .insert_source(msg_rx, |event, _, state| {
+                if let calloop::channel::Event::Msg(msg) = event {
+                    state.on_message(msg);
+                }
+            })
+            .expect("failed to init the message channel");
+        handle
+            .insert_source(
+                calloop::timer::Timer::from_duration(Duration::from_secs(1)),
+                |_, _, state| {
+                    state.tick();
+                    calloop::timer::TimeoutAction::ToDuration(Duration::from_secs(1))
+                },
+            )
+            .expect("failed to init the tick timer");
+        // Children are reaped as soon as they exit.
+        if let Ok(signals) = calloop::signals::Signals::new(&[calloop::signals::Signal::SIGCHLD]) {
+            let _ = handle.insert_source(signals, |_, _, state| {
+                if let Some(sup) = state.supervisor.as_mut() {
+                    sup.reap();
+                }
+            });
+        }
+
+        let config = if opts.greeter {
+            CompConfig::from_settings(&settings::Config::default(), &opts.config)
+        } else {
+            CompConfig::load(&opts.config)
+        };
+        let config_watcher = if opts.greeter {
+            None
+        } else {
+            settings::watch(&opts.config).ok()
+        };
+        let control_path = opts.runtime_dir.join("edex-comp.sock");
+        let control = match ControlServer::bind(&control_path) {
+            Ok(c) => Some(c),
+            Err(e) => {
+                warn!("control socket unavailable: {e:#}");
+                None
+            }
+        };
 
         let xwayland_shell_state = xwayland_shell::XWaylandShellState::new::<Self>(&dh.clone());
 
         XWaylandKeyboardGrabState::new::<Self>(&dh.clone());
 
-        AnvilState {
+        EdexState {
             backend_data,
             display_handle: dh,
             socket_name,
@@ -726,7 +845,72 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
             xwm: None,
             xdisplay: None,
             show_window_preview: false,
+
+            wm: Wm::new(config.wm),
+            config,
+            config_watcher,
+            control,
+            last_snapshot: Snapshot::default(),
+            layout_dirty: true,
+            supervisor: None,
+            mode: if opts.greeter {
+                RunMode::Greeter
+            } else {
+                RunMode::Session
+            },
+            runtime_dir: opts.runtime_dir,
+            lock: LockState::default(),
+            idle: IdleState::default(),
+            keyboard_layout: String::new(),
+            prev_focus: None,
+            last_regular_focus: None,
+            pending_tap: None,
+            bind_repeat: None,
+            msg_tx,
+            session_lock_state,
+            idle_notifier_state,
+            foreign_toplevel_state,
+            foreign_toplevels: HashMap::new(),
+            autostart: opts.autostart,
         }
+    }
+
+    fn on_message(&mut self, msg: CompMsg) {
+        match msg {
+            CompMsg::LoginOk { user, session } => {
+                if let Some(s) = session.filter(|s| s != "edex-de") {
+                    warn!("session {s} is not run by edex-comp; starting eDEX-DE");
+                }
+                match crate::session::lookup_user(&user) {
+                    Some(u) => self.start_session(u),
+                    None => warn!("{user} has no passwd entry"),
+                }
+            }
+        }
+    }
+
+    /// Open an extra Wayland socket in `dir` (the session user's runtime directory).
+    pub fn listen_wayland_in(&mut self, dir: &std::path::Path) -> anyhow::Result<String> {
+        let saved = std::env::var_os("XDG_RUNTIME_DIR");
+        std::env::set_var("XDG_RUNTIME_DIR", dir);
+        let source = ListeningSocketSource::new_auto();
+        match saved {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+        let source = source?;
+        let name = source.socket_name().to_string_lossy().into_owned();
+        self.handle
+            .insert_source(source, |client_stream, _, data| {
+                if let Err(err) = data
+                    .display_handle
+                    .insert_client(client_stream, Arc::new(ClientState::default()))
+                {
+                    warn!("Error adding wayland client: {}", err);
+                };
+            })
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(name)
     }
 
     pub fn start_xwayland(&mut self) {
@@ -734,7 +918,11 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
         use smithay::wayland::compositor::CompositorHandler;
 
-        let (xwayland, client) = XWayland::spawn(
+        if crate::session::which("Xwayland").is_none() {
+            info!("Xwayland is not installed; X11 applications will not run");
+            return;
+        }
+        let (xwayland, client) = match XWayland::spawn(
             &self.display_handle,
             None,
             std::iter::empty::<(String, String)>(),
@@ -742,8 +930,15 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
             Stdio::null(),
             Stdio::null(),
             |_| (),
-        )
-        .expect("failed to start XWayland");
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                warn!("cannot start Xwayland: {e}");
+                return;
+            }
+        };
+        // Known before the server is ready, so session programs get DISPLAY right away.
+        self.xdisplay = Some(xwayland.display_number());
 
         let ret = self
             .handle
@@ -752,7 +947,7 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
                     x11_socket,
                     display_number,
                 } => {
-                    let xwayland_scale = std::env::var("ANVIL_XWAYLAND_SCALE")
+                    let xwayland_scale = std::env::var("EDEX_XWAYLAND_SCALE")
                         .ok()
                         .and_then(|s| s.parse::<f64>().ok())
                         .unwrap_or(1.);
@@ -785,7 +980,7 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
     }
 }
 
-impl<BackendData: Backend + 'static> AnvilState<BackendData> {
+impl<BackendData: Backend + 'static> EdexState<BackendData> {
     pub fn pre_repaint(&mut self, output: &Output, frame_target: impl Into<Time<Monotonic>>) {
         let frame_target = frame_target.into();
 
@@ -1137,11 +1332,34 @@ pub fn take_presentation_feedback(
     output_presentation_feedback
 }
 
-pub trait Backend {
+pub trait Backend: Sized {
     const HAS_RELATIVE_MOTION: bool = false;
     const HAS_GESTURES: bool = false;
     fn seat_name(&self) -> String;
     fn reset_buffers(&mut self, output: &Output);
     fn early_import(&mut self, surface: &WlSurface);
     fn update_led_state(&mut self, led_state: LedState);
+
+    /// Force a full redraw of `output` (after lock/unlock).
+    fn reset_buffers_for(state: &mut EdexState<Self>, output: &Output) {
+        state.backend_data.reset_buffers(output);
+    }
+    /// Night light: a colour temperature, or `None` for neutral.
+    fn set_gamma(_state: &mut EdexState<Self>, _kelvin: Option<u32>) {}
+    /// Turn every output on or off.
+    fn set_dpms(_state: &mut EdexState<Self>, _on: bool) {}
+    /// Apply `config.outputs` (mode, position, scale, transform, disabled).
+    fn apply_output_config(_state: &mut EdexState<Self>) {}
+    /// Apply pointer settings to input devices.
+    fn apply_input_config(_state: &mut EdexState<Self>) {}
+    /// Write a PNG of an output (or a region of the global space).
+    fn screenshot(
+        _state: &mut EdexState<Self>,
+        _output: Option<&str>,
+        _region: Option<Rectangle<i32, Logical>>,
+        _path: &str,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("screenshots are not supported by this backend")
+    }
+    fn switch_vt(_state: &mut EdexState<Self>, _vt: i32) {}
 }

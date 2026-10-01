@@ -13,13 +13,15 @@ use smithay::{
     },
     desktop::space::{
         constrain_space_element, ConstrainBehavior, ConstrainReference, Space, SpaceRenderElements,
+        SurfaceTree,
     },
     output::Output,
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Point, Rectangle, Size},
 };
 
 use crate::{
-    drawing::{PointerRenderElement, CLEAR_COLOR, CLEAR_COLOR_FULLSCREEN},
+    drawing::{PointerRenderElement, CLEAR_COLOR_FULLSCREEN},
     shell::{FullscreenSurface, WindowElement, WindowRenderElement},
 };
 
@@ -125,12 +127,23 @@ where
             )
         })
 }
+/// What an output shows besides the space.
+#[derive(Clone, Copy, Debug)]
+pub enum Screen<'a> {
+    Normal {
+        clear: Color32F,
+    },
+    /// The session is locked: only the lock surface (black until it arrives).
+    Locked(Option<&'a WlSurface>),
+}
+
 pub fn output_elements<R>(
     output: &Output,
     space: &Space<WindowElement>,
     custom_elements: impl IntoIterator<Item = CustomRenderElements<R>>,
     renderer: &mut R,
     show_window_preview: bool,
+    screen: Screen<'_>,
 ) -> (
     Vec<OutputRenderElements<R, WindowRenderElement<R>>>,
     Color32F,
@@ -139,6 +152,28 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Clone + 'static,
 {
+    let clear = match screen {
+        Screen::Locked(surface) => {
+            let scale = output.current_scale().fractional_scale().into();
+            let mut elements: Vec<OutputRenderElements<R, WindowRenderElement<R>>> =
+                custom_elements
+                    .into_iter()
+                    .map(OutputRenderElements::from)
+                    .collect();
+            if let Some(surface) = surface {
+                let lock: Vec<CustomRenderElements<R>> = AsRenderElements::<R>::render_elements(
+                    &SurfaceTree::from_surface(surface),
+                    renderer,
+                    (0, 0).into(),
+                    scale,
+                    1.0,
+                );
+                elements.extend(lock.into_iter().map(OutputRenderElements::from));
+            }
+            return (elements, Color32F::new(0.0, 0.0, 0.0, 1.0));
+        }
+        Screen::Normal { clear } => clear,
+    };
     if let Some(window) = output
         .user_data()
         .get::<FullscreenSurface>()
@@ -177,7 +212,7 @@ where
         .expect("output without mode?");
         output_render_elements.extend(space_elements.into_iter().map(OutputRenderElements::Space));
 
-        (output_render_elements, CLEAR_COLOR)
+        (output_render_elements, clear)
     }
 }
 
@@ -191,6 +226,7 @@ pub fn render_output<'a, 'd, R>(
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     show_window_preview: bool,
+    screen: Screen<'_>,
 ) -> Result<RenderOutputResult<'d>, OutputDamageTrackerError<R::Error>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -202,6 +238,7 @@ where
         custom_elements,
         renderer,
         show_window_preview,
+        screen,
     );
     damage_tracker.render_output(renderer, framebuffer, age, &elements, clear_color)
 }

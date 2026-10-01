@@ -20,38 +20,29 @@ use smithay::{
         xwayland_shell::{XWaylandShellHandler, XWaylandShellState},
     },
     xwayland::{
-        xwm::{Reorder, ResizeEdge as X11ResizeEdge, XwmId},
+        xwm::{Reorder, ResizeEdge as X11ResizeEdge, WmWindowProperty, XwmId},
         X11Surface, X11Wm, XwmHandler,
     },
 };
 use tracing::{error, trace};
 
-use crate::{focus::KeyboardFocusTarget, state::Backend, AnvilState};
+use crate::{focus::KeyboardFocusTarget, state::Backend, EdexState};
+
+use crate::wm::WindowInfo;
+use comp_proto::WindowMode;
 
 use super::{
-    place_new_window, FullscreenSurface, PointerMoveSurfaceGrab, PointerResizeSurfaceGrab,
-    ResizeData, ResizeState, SurfaceData, TouchMoveSurfaceGrab, WindowElement,
+    PointerMoveSurfaceGrab, PointerResizeSurfaceGrab, ResizeData, ResizeState, SurfaceData,
+    TouchMoveSurfaceGrab, WindowElement,
 };
 
-#[derive(Debug, Default)]
-struct OldGeometry(RefCell<Option<Rectangle<i32, Logical>>>);
-impl OldGeometry {
-    pub fn save(&self, geo: Rectangle<i32, Logical>) {
-        *self.0.borrow_mut() = Some(geo);
-    }
-
-    pub fn restore(&self) -> Option<Rectangle<i32, Logical>> {
-        self.0.borrow_mut().take()
-    }
-}
-
-impl<BackendData: Backend> XWaylandShellHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> XWaylandShellHandler for EdexState<BackendData> {
     fn xwayland_shell_state(&mut self) -> &mut XWaylandShellState {
         &mut self.xwayland_shell_state
     }
 }
 
-impl<BackendData: Backend> XwmHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> XwmHandler for EdexState<BackendData> {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.xwm.as_mut().unwrap()
     }
@@ -60,63 +51,85 @@ impl<BackendData: Backend> XwmHandler for AnvilState<BackendData> {
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
     fn map_window_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        window.set_mapped(true).unwrap();
-        let window = WindowElement(Window::new_x11_window(window));
-        place_new_window(
-            &mut self.space,
-            self.pointer.current_location(),
-            &window,
-            true,
-        );
-        let bbox = self.space.element_bbox(&window).unwrap();
-        let Some(xsurface) = window.0.x11_surface() else {
-            unreachable!()
+        if let Err(e) = window.set_mapped(true) {
+            tracing::warn!("cannot map X11 window: {e}");
+            return;
+        }
+        let fixed = matches!((window.min_size(), window.max_size()), (Some(a), Some(b)) if a == b && !a.is_empty());
+        let info = WindowInfo {
+            app_id: window.class(),
+            title: window.title(),
+            xwayland: true,
+            pid: window.pid().map(|p| p as i32),
+            wants_float: window.is_transient_for().is_some() || window.is_popup() || fixed,
+            preferred: Some((window.geometry().size.w, window.geometry().size.h))
+                .filter(|(w, h)| *w > 0 && *h > 0),
         };
-        xsurface.configure(Some(bbox)).unwrap();
-        window.set_ssd(!xsurface.is_decorated());
+        let element = WindowElement(Window::new_x11_window(window));
+        self.manage_window(element, info);
+        self.flush();
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        // Menus and tooltips place themselves.
         let location = window.geometry().loc;
         let window = WindowElement(Window::new_x11_window(window));
         self.space.map_element(window, location, true);
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        let maybe = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == &window))
-            .cloned();
-        if let Some(elem) = maybe {
-            self.space.unmap_elem(&elem)
+        let element = self.x11_element(&window);
+        if let Some(elem) = element {
+            if self.window_id(&elem).is_some() {
+                self.unmanage_window(&elem);
+            } else {
+                self.space.unmap_elem(&elem);
+            }
         }
         if !window.is_override_redirect() {
-            window.set_mapped(false).unwrap();
+            let _ = window.set_mapped(false);
         }
     }
 
-    fn destroyed_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
+    fn destroyed_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(elem) = self.x11_element(&window) {
+            self.unmanage_window(&elem);
+        }
+    }
 
     fn configure_request(
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _x: Option<i32>,
-        _y: Option<i32>,
+        x: Option<i32>,
+        y: Option<i32>,
         w: Option<u32>,
         h: Option<u32>,
         _reorder: Option<Reorder>,
     ) {
-        // we just set the new size, but don't let windows move themselves around freely
-        let mut geo = window.geometry();
-        if let Some(w) = w {
-            geo.size.w = w as i32;
+        let managed = self.x11_element(&window).and_then(|e| self.window_id(&e));
+        match managed {
+            // Tiled windows keep their tile: answer with the geometry they already have.
+            Some(id) if !self.wm.is_floating(id) => {
+                let _ = window.configure(None);
+            }
+            _ => {
+                let mut geo = window.geometry();
+                if let Some(x) = x.filter(|_| managed.is_none()) {
+                    geo.loc.x = x;
+                }
+                if let Some(y) = y.filter(|_| managed.is_none()) {
+                    geo.loc.y = y;
+                }
+                if let Some(w) = w {
+                    geo.size.w = w as i32;
+                }
+                if let Some(h) = h {
+                    geo.size.h = h as i32;
+                }
+                let _ = window.configure(geo);
+            }
         }
-        if let Some(h) = h {
-            geo.size.h = h as i32;
-        }
-        let _ = window.configure(geo);
     }
 
     fn configure_notify(
@@ -126,98 +139,42 @@ impl<BackendData: Backend> XwmHandler for AnvilState<BackendData> {
         geometry: Rectangle<i32, Logical>,
         _above: Option<u32>,
     ) {
-        let Some(elem) = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == &window))
-            .cloned()
-        else {
+        // Only override-redirect windows position themselves.
+        if !window.is_override_redirect() {
+            return;
+        }
+        let Some(elem) = self.x11_element(&window) else {
             return;
         };
         self.space.map_element(elem, geometry.loc, false);
-        // TODO: We don't properly handle the order of override-redirect windows here,
-        //       they are always mapped top and then never reordered.
+    }
+
+    fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, _property: WmWindowProperty) {
+        if let Some(elem) = self.x11_element(&window) {
+            self.refresh_window_info(&elem);
+        }
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        self.maximize_request_x11(&window);
+        self.x11_mode_request(&window, WindowMode::Maximized, true);
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let Some(elem) = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == &window))
-            .cloned()
-        else {
-            return;
-        };
-
-        window.set_maximized(false).unwrap();
-        if let Some(old_geo) = window
-            .user_data()
-            .get::<OldGeometry>()
-            .and_then(|data| data.restore())
-        {
-            window.configure(old_geo).unwrap();
-            self.space.map_element(elem, old_geo.loc, false);
-        }
+        self.x11_mode_request(&window, WindowMode::Maximized, false);
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(elem) = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == &window))
-        {
-            let outputs_for_window = self.space.outputs_for_element(elem);
-            let output = outputs_for_window
-                .first()
-                // The window hasn't been mapped yet, use the primary output instead
-                .or_else(|| self.space.outputs().next())
-                // Assumes that at least one output exists
-                .expect("No outputs found");
-            let geometry = self.space.output_geometry(output).unwrap();
-
-            window.set_fullscreen(true).unwrap();
-            elem.set_ssd(false);
-            window.configure(geometry).unwrap();
-            output
-                .user_data()
-                .insert_if_missing(FullscreenSurface::default);
-            output
-                .user_data()
-                .get::<FullscreenSurface>()
-                .unwrap()
-                .set(elem.clone());
-            trace!("Fullscreening: {:?}", elem);
-        }
+        self.x11_mode_request(&window, WindowMode::Fullscreen, true);
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        if let Some(elem) = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == &window))
-        {
-            window.set_fullscreen(false).unwrap();
-            elem.set_ssd(!window.is_decorated());
-            if let Some(output) = self.space.outputs().find(|o| {
-                o.user_data()
-                    .get::<FullscreenSurface>()
-                    .and_then(|f| f.get())
-                    .map(|w| &w == elem)
-                    .unwrap_or(false)
-            }) {
-                trace!("Unfullscreening: {:?}", elem);
-                output
-                    .user_data()
-                    .get::<FullscreenSurface>()
-                    .unwrap()
-                    .clear();
-                window.configure(self.space.element_bbox(elem)).unwrap();
-                self.backend_data.reset_buffers(output);
-            }
+        self.x11_mode_request(&window, WindowMode::Fullscreen, false);
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(id) = self.x11_element(&window).and_then(|e| self.window_id(&e)) {
+            self.wm.minimize(Some(id));
+            self.mark_layout();
         }
     }
 
@@ -228,8 +185,12 @@ impl<BackendData: Backend> XwmHandler for AnvilState<BackendData> {
         _button: u32,
         edges: X11ResizeEdge,
     ) {
-        // luckily anvil only supports one seat anyway...
-        let start_data = self.pointer.grab_start_data().unwrap();
+        if !self.x11_floating(&window) {
+            return;
+        }
+        let Some(start_data) = self.pointer.grab_start_data() else {
+            return;
+        };
 
         let Some(element) = self
             .space
@@ -343,114 +304,63 @@ impl<BackendData: Backend> XwmHandler for AnvilState<BackendData> {
     }
 }
 
-impl<BackendData: Backend> AnvilState<BackendData> {
-    pub fn maximize_request_x11(&mut self, window: &X11Surface) {
-        let Some(elem) = self
-            .space
-            .elements()
+impl<BackendData: Backend> EdexState<BackendData> {
+    fn x11_element(&self, window: &X11Surface) -> Option<WindowElement> {
+        self.wm
+            .handles()
+            .map(|(_, w)| w)
             .find(|e| matches!(e.0.x11_surface(), Some(w) if w == window))
             .cloned()
-        else {
-            return;
-        };
+            .or_else(|| {
+                self.space
+                    .elements()
+                    .find(|e| matches!(e.0.x11_surface(), Some(w) if w == window))
+                    .cloned()
+            })
+    }
 
-        let old_geo = self.space.element_bbox(&elem).unwrap();
-        let outputs_for_window = self.space.outputs_for_element(&elem);
-        let output = outputs_for_window
-            .first()
-            // The window hasn't been mapped yet, use the primary output instead
-            .or_else(|| self.space.outputs().next())
-            // Assumes that at least one output exists
-            .expect("No outputs found");
-        let geometry = self.space.output_geometry(output).unwrap();
+    fn x11_floating(&self, window: &X11Surface) -> bool {
+        self.x11_element(window)
+            .and_then(|e| self.window_id(&e))
+            .is_some_and(|id| self.wm.is_floating(id))
+    }
 
-        window.set_maximized(true).unwrap();
-        window.configure(geometry).unwrap();
-        window.user_data().insert_if_missing(OldGeometry::default);
-        window
-            .user_data()
-            .get::<OldGeometry>()
-            .unwrap()
-            .save(old_geo);
-        self.space.map_element(elem, geometry.loc, false);
+    fn x11_mode_request(&mut self, window: &X11Surface, mode: WindowMode, on: bool) {
+        if let Some(id) = self.x11_element(window).and_then(|e| self.window_id(&e)) {
+            self.wm.request_mode(id, mode, on);
+            self.mark_layout();
+        }
     }
 
     pub fn move_request_x11(&mut self, window: &X11Surface) {
+        if !self.x11_floating(window) {
+            return;
+        }
+        let Some(element) = self.x11_element(window) else {
+            return;
+        };
+        let Some(initial_window_location) = self.space.element_location(&element) else {
+            return;
+        };
         if let Some(touch) = self.seat.get_touch() {
             if let Some(start_data) = touch.grab_start_data() {
-                let element = self
-                    .space
-                    .elements()
-                    .find(|e| matches!(e.0.x11_surface(), Some(w) if w == window));
-
-                if let Some(element) = element {
-                    let mut initial_window_location = self.space.element_location(element).unwrap();
-
-                    // If surface is maximized then unmaximize it
-                    if window.is_maximized() {
-                        window.set_maximized(false).unwrap();
-                        let pos = start_data.location;
-                        initial_window_location = (pos.x as i32, pos.y as i32).into();
-                        if let Some(old_geo) = window
-                            .user_data()
-                            .get::<OldGeometry>()
-                            .and_then(|data| data.restore())
-                        {
-                            window
-                                .configure(Rectangle::new(initial_window_location, old_geo.size))
-                                .unwrap();
-                        }
-                    }
-
-                    let grab = TouchMoveSurfaceGrab {
-                        start_data,
-                        window: element.clone(),
-                        initial_window_location,
-                    };
-
-                    touch.set_grab(self, grab, SERIAL_COUNTER.next_serial());
-                    return;
-                }
+                let grab = TouchMoveSurfaceGrab {
+                    start_data,
+                    window: element,
+                    initial_window_location,
+                };
+                touch.set_grab(self, grab, SERIAL_COUNTER.next_serial());
+                return;
             }
         }
-
-        // luckily anvil only supports one seat anyway...
         let Some(start_data) = self.pointer.grab_start_data() else {
             return;
         };
-
-        let Some(element) = self
-            .space
-            .elements()
-            .find(|e| matches!(e.0.x11_surface(), Some(w) if w == window))
-        else {
-            return;
-        };
-
-        let mut initial_window_location = self.space.element_location(element).unwrap();
-
-        // If surface is maximized then unmaximize it
-        if window.is_maximized() {
-            window.set_maximized(false).unwrap();
-            let pos = self.pointer.current_location();
-            initial_window_location = (pos.x as i32, pos.y as i32).into();
-            if let Some(old_geo) = window
-                .user_data()
-                .get::<OldGeometry>()
-                .and_then(|data| data.restore())
-            {
-                window
-                    .configure(Rectangle::new(initial_window_location, old_geo.size))
-                    .unwrap();
-            }
-        }
-
         let grab = PointerMoveSurfaceGrab {
             start_data,
-            window: element.clone(),
+            window: element,
             initial_window_location,
         };
-
         let pointer = self.pointer.clone();
         pointer.set_grab(self, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
     }

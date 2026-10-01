@@ -42,8 +42,9 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::state::{take_presentation_feedback, AnvilState, Backend};
+use crate::state::{take_presentation_feedback, Backend, EdexState, InitOptions};
 use crate::{drawing::*, render::*};
+use smithay::backend::renderer::Color32F;
 
 pub const OUTPUT_NAME: &str = "winit";
 
@@ -54,7 +55,7 @@ pub struct WinitData {
     full_redraw: u8,
 }
 
-impl DmabufHandler for AnvilState<WinitData> {
+impl DmabufHandler for EdexState<WinitData> {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         &mut self.backend_data.dmabuf_state.0
     }
@@ -72,13 +73,13 @@ impl DmabufHandler for AnvilState<WinitData> {
             .import_dmabuf(&dmabuf, None)
             .is_ok()
         {
-            let _ = notifier.successful::<AnvilState<WinitData>>();
+            let _ = notifier.successful::<EdexState<WinitData>>();
         } else {
             notifier.failed();
         }
     }
 }
-delegate_dmabuf!(AnvilState<WinitData>);
+delegate_dmabuf!(EdexState<WinitData>);
 
 impl Backend for WinitData {
     fn seat_name(&self) -> String {
@@ -89,9 +90,43 @@ impl Backend for WinitData {
     }
     fn early_import(&mut self, _surface: &wl_surface::WlSurface) {}
     fn update_led_state(&mut self, _led_state: LedState) {}
+
+    fn reset_buffers_for(state: &mut EdexState<Self>, _output: &Output) {
+        state.backend_data.full_redraw = 4;
+    }
+
+    fn screenshot(
+        state: &mut EdexState<Self>,
+        _output: Option<&str>,
+        region: Option<smithay::utils::Rectangle<i32, smithay::utils::Logical>>,
+        path: &str,
+    ) -> anyhow::Result<()> {
+        let output = state
+            .space
+            .outputs()
+            .next()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("no output"))?;
+        let c = state.config.background;
+        let clear = Color32F::new(c[0], c[1], c[2], 1.0);
+        let renderer = state.backend_data.backend.renderer();
+        let img = crate::screenshot::capture::<_, smithay::backend::renderer::gles::GlesTexture>(
+            renderer,
+            &output,
+            &state.space,
+            clear,
+        )?;
+        let img = match (region, state.space.output_geometry(&output)) {
+            (Some(r), Some(geo)) => {
+                crate::screenshot::crop(img, geo, output.current_scale().fractional_scale(), r)?
+            }
+            _ => img,
+        };
+        crate::screenshot::save(&img, path)
+    }
 }
 
-pub fn run_winit() {
+pub fn run_winit(opts: InitOptions) {
     let mut event_loop = EventLoop::try_new().unwrap();
     let display = Display::new().unwrap();
     let mut display_handle = display.handle();
@@ -118,7 +153,7 @@ pub fn run_winit() {
             model: "Winit".into(),
         },
     );
-    let _global = output.create_global::<AnvilState<WinitData>>(&display.handle());
+    let _global = output.create_global::<EdexState<WinitData>>(&display.handle());
     output.change_current_state(
         Some(mode),
         Some(Transform::Flipped180),
@@ -153,7 +188,7 @@ pub fn run_winit() {
     let dmabuf_state = if let Some(default_feedback) = dmabuf_default_feedback {
         let mut dmabuf_state = DmabufState::new();
         let dmabuf_global = dmabuf_state
-            .create_global_with_default_feedback::<AnvilState<WinitData>>(
+            .create_global_with_default_feedback::<EdexState<WinitData>>(
                 &display.handle(),
                 &default_feedback,
             );
@@ -162,7 +197,7 @@ pub fn run_winit() {
         let dmabuf_formats = backend.renderer().dmabuf_formats();
         let mut dmabuf_state = DmabufState::new();
         let dmabuf_global =
-            dmabuf_state.create_global::<AnvilState<WinitData>>(&display.handle(), dmabuf_formats);
+            dmabuf_state.create_global::<EdexState<WinitData>>(&display.handle(), dmabuf_formats);
         (dmabuf_state, dmabuf_global, None)
     };
 
@@ -184,13 +219,20 @@ pub fn run_winit() {
             full_redraw: 0,
         }
     };
-    let mut state = AnvilState::init(display, event_loop.handle(), data, true);
+    let greeter = opts.greeter;
+    let mut state = EdexState::init(display, event_loop.handle(), data, true, opts);
     state
         .shm_state
         .update_formats(state.backend_data.backend.renderer().shm_formats());
     state.space.map_output(&output, (0, 0));
+    state.wm_output_added(&output);
+    state.apply_config();
 
-    state.start_xwayland();
+    if greeter {
+        state.start_greeter();
+    } else {
+        state.start_direct_session();
+    }
 
     info!("Initialization completed, starting the main loop.");
 
@@ -208,7 +250,7 @@ pub fn run_winit() {
                 };
                 output.change_current_state(Some(mode), None, None, None);
                 output.set_preferred(mode);
-                crate::shell::fixup_positions(&mut state.space, state.pointer.current_location());
+                state.wm_outputs_changed();
             }
             WinitEvent::Input(event) => state.process_input_event_windowed(event, OUTPUT_NAME),
             _ => (),
@@ -228,6 +270,17 @@ pub fn run_winit() {
                     .map(|mode| Duration::from_secs_f64(1_000f64 / mode.refresh as f64))
                     .unwrap_or_default();
             state.pre_repaint(&output, frame_target);
+
+            let lock_surface = state.lock_surface_for(&output);
+            let locked = state.lock.locked;
+            let background = state.config.background;
+            let screen = if locked {
+                Screen::Locked(lock_surface.as_ref())
+            } else {
+                Screen::Normal {
+                    clear: Color32F::new(background[0], background[1], background[2], 1.0),
+                }
+            };
 
             let backend = &mut state.backend_data.backend;
 
@@ -313,6 +366,7 @@ pub fn run_winit() {
                     damage_tracker,
                     age,
                     show_window_preview,
+                    screen,
                 )
                 .map_err(|err| match err {
                     OutputDamageTrackerError::Rendering(err) => err.into(),
@@ -367,6 +421,8 @@ pub fn run_winit() {
         if result.is_err() {
             state.running.store(false, Ordering::SeqCst);
         } else {
+            state.handle_control();
+            state.flush();
             state.space.refresh();
             state.popups.cleanup();
             display_handle.flush_clients().unwrap();

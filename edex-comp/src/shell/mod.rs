@@ -7,8 +7,7 @@ use smithay::wayland::drm_syncobj::DrmSyncobjCachedState;
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
     desktop::{
-        layer_map_for_output, space::SpaceElement, LayerSurface, PopupKind, PopupManager, Space,
-        WindowSurfaceType,
+        layer_map_for_output, LayerSurface, PopupKind, PopupManager, Space, WindowSurfaceType,
     },
     input::pointer::{CursorImageStatus, CursorImageSurfaceData},
     output::Output,
@@ -19,7 +18,7 @@ use smithay::{
             Client, Resource,
         },
     },
-    utils::{IsAlive, Logical, Point, Rectangle, Size},
+    utils::{IsAlive, Logical, Rectangle},
     wayland::{
         buffer::BufferHandler,
         compositor::{
@@ -39,40 +38,17 @@ use smithay::{
 };
 
 use crate::{
-    state::{AnvilState, Backend},
+    state::{Backend, EdexState},
     ClientState,
 };
 
 mod element;
 mod grabs;
-pub(crate) mod ssd;
 mod x11;
 mod xdg;
 
 pub use self::element::*;
 pub use self::grabs::*;
-
-fn fullscreen_output_geometry(
-    wl_surface: &WlSurface,
-    wl_output: Option<&wl_output::WlOutput>,
-    space: &mut Space<WindowElement>,
-) -> Option<Rectangle<i32, Logical>> {
-    // First test if a specific output has been requested
-    // if the requested output is not found ignore the request
-    wl_output
-        .and_then(Output::from_resource)
-        .or_else(|| {
-            let w = space.elements().find(|window| {
-                window
-                    .wl_surface()
-                    .map(|s| &*s == wl_surface)
-                    .unwrap_or(false)
-            });
-            w.and_then(|w| space.outputs_for_element(w).first().cloned())
-        })
-        .as_ref()
-        .and_then(|o| space.output_geometry(o))
-}
 
 #[derive(Default)]
 pub struct FullscreenSurface(RefCell<Option<WindowElement>>);
@@ -95,11 +71,11 @@ impl FullscreenSurface {
     }
 }
 
-impl<BackendData: Backend> BufferHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> BufferHandler for EdexState<BackendData> {
     fn buffer_destroyed(&mut self, _buffer: &WlBuffer) {}
 }
 
-impl<BackendData: Backend> CompositorHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> CompositorHandler for EdexState<BackendData> {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.compositor_state
     }
@@ -237,11 +213,12 @@ impl<BackendData: Backend> CompositorHandler for AnvilState<BackendData> {
             });
         }
 
-        ensure_initial_configure(surface, &self.space, &mut self.popups)
+        let window = self.window_for_surface(surface);
+        ensure_initial_configure(surface, window, &self.space, &mut self.popups)
     }
 }
 
-impl<BackendData: Backend> WlrLayerShellHandler for AnvilState<BackendData> {
+impl<BackendData: Backend> WlrLayerShellHandler for EdexState<BackendData> {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
         &mut self.layer_shell_state
     }
@@ -273,15 +250,8 @@ impl<BackendData: Backend> WlrLayerShellHandler for AnvilState<BackendData> {
         }) {
             map.unmap_layer(&layer);
         }
-    }
-}
-
-impl<BackendData: Backend> AnvilState<BackendData> {
-    pub fn window_for_surface(&self, surface: &WlSurface) -> Option<WindowElement> {
-        self.space
-            .elements()
-            .find(|window| window.wl_surface().map(|s| &*s == surface).unwrap_or(false))
-            .cloned()
+        // Focus returns to the window or canvas the layer took it from.
+        self.mark_layout();
     }
 }
 
@@ -293,6 +263,7 @@ pub struct SurfaceData {
 
 fn ensure_initial_configure(
     surface: &WlSurface,
+    window: Option<WindowElement>,
     space: &Space<WindowElement>,
     popups: &mut PopupManager,
 ) {
@@ -308,11 +279,7 @@ fn ensure_initial_configure(
         |_, _, _| true,
     );
 
-    if let Some(window) = space
-        .elements()
-        .find(|window| window.wl_surface().map(|s| &*s == surface).unwrap_or(false))
-        .cloned()
-    {
+    if let Some(window) = window {
         // send the initial configure if relevant
         if let Some(toplevel) = window.0.toplevel() {
             let initial_configure_sent = with_states(surface, |states| {
@@ -392,80 +359,4 @@ fn ensure_initial_configure(
             layer.layer_surface().send_configure();
         }
     };
-}
-
-fn place_new_window(
-    space: &mut Space<WindowElement>,
-    pointer_location: Point<f64, Logical>,
-    window: &WindowElement,
-    activate: bool,
-) {
-    // place the window at a random location on same output as pointer
-    // or if there is not output in a [0;800]x[0;800] square
-
-    let output = space
-        .output_under(pointer_location)
-        .next()
-        .or_else(|| space.outputs().next())
-        .cloned();
-    let output_geometry = output
-        .and_then(|o| {
-            let geo = space.output_geometry(&o)?;
-            let map = layer_map_for_output(&o);
-            let zone = map.non_exclusive_zone();
-            Some(Rectangle::new(geo.loc + zone.loc, zone.size))
-        })
-        .unwrap_or_else(|| Rectangle::from_size((800, 800).into()));
-
-    // set the initial toplevel bounds
-    #[allow(irrefutable_let_patterns)]
-    if let Some(toplevel) = window.0.toplevel() {
-        toplevel.with_pending_state(|state| {
-            state.bounds = Some(output_geometry.size);
-        });
-    }
-
-    let x = output_geometry.loc.x + output_geometry.size.w / 4;
-    let y = output_geometry.loc.y + output_geometry.size.h / 4;
-    space.map_element(window.clone(), (x, y), activate);
-}
-
-pub fn fixup_positions(space: &mut Space<WindowElement>, pointer_location: Point<f64, Logical>) {
-    // fixup outputs
-    let mut offset = Point::<i32, Logical>::from((0, 0));
-    for output in space.outputs().cloned().collect::<Vec<_>>().into_iter() {
-        let size = space
-            .output_geometry(&output)
-            .map(|geo| geo.size)
-            .unwrap_or_else(|| Size::from((0, 0)));
-        space.map_output(&output, offset);
-        layer_map_for_output(&output).arrange();
-        offset.x += size.w;
-    }
-
-    // fixup windows
-    let mut orphaned_windows = Vec::new();
-    let outputs = space
-        .outputs()
-        .flat_map(|o| {
-            let geo = space.output_geometry(o)?;
-            let map = layer_map_for_output(o);
-            let zone = map.non_exclusive_zone();
-            Some(Rectangle::new(geo.loc + zone.loc, zone.size))
-        })
-        .collect::<Vec<_>>();
-    for window in space.elements() {
-        let window_location = match space.element_location(window) {
-            Some(loc) => loc,
-            None => continue,
-        };
-        let geo_loc = window.bbox().loc + window_location;
-
-        if !outputs.iter().any(|o_geo| o_geo.contains(geo_loc)) {
-            orphaned_windows.push(window.clone());
-        }
-    }
-    for window in orphaned_windows.into_iter() {
-        place_new_window(space, pointer_location, &window, false);
-    }
 }

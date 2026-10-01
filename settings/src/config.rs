@@ -133,6 +133,17 @@ pub struct Wm {
     pub animations: bool,
     pub blur: bool,
     pub rounding: u32,
+    /// Extra key bindings for edex-comp, applied over the built-in ones. An action of `none`
+    /// removes a built-in binding.
+    pub binds: Vec<Bind>,
+}
+
+/// `keys` like `SUPER+SHIFT+Return`; `action` like `exec foot`, `close`, `workspace 3` or
+/// `shell toggle launcher` (see edex-comp's binds module for the full list).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Bind {
+    pub keys: String,
+    pub action: String,
 }
 
 impl Default for Wm {
@@ -146,6 +157,7 @@ impl Default for Wm {
             animations: true,
             blur: false,
             rounding: 0,
+            binds: Vec::new(),
         }
     }
 }

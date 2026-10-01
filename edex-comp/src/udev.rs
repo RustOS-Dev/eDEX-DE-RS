@@ -11,13 +11,15 @@ use crate::{
     drawing::*,
     render::*,
     shell::WindowElement,
-    state::{take_presentation_feedback, update_primary_scanout_output, AnvilState, Backend},
+    state::{
+        take_presentation_feedback, update_primary_scanout_output, Backend, EdexState, InitOptions,
+    },
 };
 use crate::{
     shell::WindowRenderElement,
     state::{DndIcon, SurfaceDmabufFeedback},
 };
-use smithay::backend::renderer::ImportEgl;
+use smithay::backend::renderer::{Color32F, ImportEgl};
 use smithay::{
     backend::{
         allocator::{
@@ -77,7 +79,7 @@ use smithay::{
         },
         wayland_server::{backend::GlobalId, protocol::wl_surface, Display, DisplayHandle},
     },
-    utils::{DeviceFd, IsAlive, Logical, Monotonic, Point, Scale, Time, Transform},
+    utils::{DeviceFd, IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
     wayland::{
         compositor,
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
@@ -132,6 +134,12 @@ pub struct UdevData {
     pointer_image: crate::cursor::Cursor,
     debug_flags: DebugFlags,
     keyboards: Vec<smithay::reexports::input::Device>,
+    /// Every libinput device, for pointer settings.
+    input_devices: Vec<smithay::reexports::input::Device>,
+    dpms_on: bool,
+    gamma: Option<u32>,
+    /// Connectors switched off in the display settings.
+    disabled_connectors: Vec<(DrmNode, connector::Info, crtc::Handle)>,
 }
 
 impl UdevData {
@@ -152,7 +160,7 @@ impl UdevData {
     }
 }
 
-impl DmabufHandler for AnvilState<UdevData> {
+impl DmabufHandler for EdexState<UdevData> {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
         &mut self.backend_data.dmabuf_state.as_mut().unwrap().0
     }
@@ -171,13 +179,13 @@ impl DmabufHandler for AnvilState<UdevData> {
             .is_ok()
         {
             dmabuf.set_node(self.backend_data.primary_gpu);
-            let _ = notifier.successful::<AnvilState<UdevData>>();
+            let _ = notifier.successful::<EdexState<UdevData>>();
         } else {
             notifier.failed();
         }
     }
 }
-delegate_dmabuf!(AnvilState<UdevData>);
+delegate_dmabuf!(EdexState<UdevData>);
 
 impl Backend for UdevData {
     const HAS_RELATIVE_MOTION: bool = true;
@@ -208,9 +216,44 @@ impl Backend for UdevData {
             keyboard.led_update(led_state.into());
         }
     }
+
+    fn set_gamma(state: &mut EdexState<Self>, kelvin: Option<u32>) {
+        state.udev_set_gamma(kelvin);
+    }
+
+    fn set_dpms(state: &mut EdexState<Self>, on: bool) {
+        state.udev_set_dpms(on);
+    }
+
+    fn apply_output_config(state: &mut EdexState<Self>) {
+        state.udev_apply_output_config();
+    }
+
+    fn apply_input_config(state: &mut EdexState<Self>) {
+        let settings = state.config.pointer;
+        for device in state.backend_data.input_devices.iter_mut() {
+            configure_pointer_device(device, &settings);
+        }
+    }
+
+    fn screenshot(
+        state: &mut EdexState<Self>,
+        output: Option<&str>,
+        region: Option<Rectangle<i32, Logical>>,
+        path: &str,
+    ) -> anyhow::Result<()> {
+        state.udev_screenshot(output, region, path)
+    }
+
+    fn switch_vt(state: &mut EdexState<Self>, vt: i32) {
+        info!(to = vt, "switching vt");
+        if let Err(err) = state.backend_data.session.change_vt(vt) {
+            error!(vt, "Error switching vt: {}", err);
+        }
+    }
 }
 
-pub fn run_udev() {
+pub fn run_udev(opts: InitOptions) {
     let mut event_loop = EventLoop::try_new().unwrap();
     let display = Display::new().unwrap();
     let mut display_handle = display.handle();
@@ -229,7 +272,7 @@ pub fn run_udev() {
     /*
      * Initialize the compositor
      */
-    let primary_gpu = if let Ok(var) = std::env::var("ANVIL_DRM_DEVICE") {
+    let primary_gpu = if let Ok(var) = std::env::var("EDEX_DRM_DEVICE") {
         DrmNode::from_path(var).expect("Invalid drm device path")
     } else {
         primary_gpu(session.seat())
@@ -266,8 +309,13 @@ pub fn run_udev() {
         pointer_element: PointerElement::default(),
         debug_flags: DebugFlags::empty(),
         keyboards: Vec::new(),
+        input_devices: Vec::new(),
+        dpms_on: true,
+        gamma: None,
+        disabled_connectors: Vec::new(),
     };
-    let mut state = AnvilState::init(display, event_loop.handle(), data, true);
+    let greeter = opts.greeter;
+    let mut state = EdexState::init(display, event_loop.handle(), data, true, opts);
 
     /*
      * Initialize the udev backend
@@ -297,6 +345,8 @@ pub fn run_udev() {
         .insert_source(libinput_backend, move |mut event, _, data| {
             let dh = data.backend_data.dh.clone();
             if let InputEvent::DeviceAdded { device } = &mut event {
+                configure_pointer_device(device, &data.config.pointer);
+                data.backend_data.input_devices.push(device.clone());
                 if device.has_capability(DeviceCapability::Keyboard) {
                     if let Some(led_state) = data
                         .seat
@@ -308,6 +358,7 @@ pub fn run_udev() {
                     data.backend_data.keyboards.push(device.clone());
                 }
             } else if let InputEvent::DeviceRemoved { ref device } = event {
+                data.backend_data.input_devices.retain(|d| d != device);
                 if device.has_capability(DeviceCapability::Keyboard) {
                     data.backend_data.keyboards.retain(|item| item != device);
                 }
@@ -355,7 +406,7 @@ pub fn run_udev() {
                         .activate(false)
                         .expect("failed to activate drm backend");
                     if let Some(lease_global) = backend.leasing_global.as_mut() {
-                        lease_global.resume::<AnvilState<UdevData>>();
+                        lease_global.resume::<EdexState<UdevData>>();
                     }
                     data.handle
                         .insert_idle(move |data| data.render(node, None, data.clock.now()));
@@ -428,7 +479,7 @@ pub fn run_udev() {
         .build()
         .unwrap();
     let mut dmabuf_state = DmabufState::new();
-    let global = dmabuf_state.create_global_with_default_feedback::<AnvilState<UdevData>>(
+    let global = dmabuf_state.create_global_with_default_feedback::<EdexState<UdevData>>(
         &display_handle,
         &default_feedback,
     );
@@ -467,7 +518,7 @@ pub fn run_udev() {
             let import_device = backend.drm_output_manager.device().device_fd().clone();
             if supports_syncobj_eventfd(&import_device) {
                 let syncobj_state =
-                    DrmSyncobjState::new::<AnvilState<UdevData>>(&display_handle, import_device);
+                    DrmSyncobjState::new::<EdexState<UdevData>>(&display_handle, import_device);
                 state.backend_data.syncobj_state = Some(syncobj_state);
             }
         }
@@ -497,10 +548,12 @@ pub fn run_udev() {
         })
         .unwrap();
 
-    /*
-     * Start XWayland if supported
-     */
-    state.start_xwayland();
+    state.apply_config();
+    if greeter {
+        state.start_greeter();
+    } else {
+        state.start_direct_session();
+    }
 
     /*
      * And run our loop
@@ -511,6 +564,8 @@ pub fn run_udev() {
         if result.is_err() {
             state.running.store(false, Ordering::SeqCst);
         } else {
+            state.handle_control();
+            state.flush();
             state.space.refresh();
             state.popups.cleanup();
             display_handle.flush_clients().unwrap();
@@ -518,7 +573,23 @@ pub fn run_udev() {
     }
 }
 
-impl DrmLeaseHandler for AnvilState<UdevData> {
+/// Tap-to-click, natural scrolling and pointer speed for a libinput device.
+fn configure_pointer_device(
+    device: &mut smithay::reexports::input::Device,
+    settings: &crate::config::PointerSettings,
+) {
+    if device.config_tap_finger_count() > 0 {
+        let _ = device.config_tap_set_enabled(settings.tap_to_click);
+    }
+    if device.config_scroll_has_natural_scroll() {
+        let _ = device.config_scroll_set_natural_scroll_enabled(settings.natural_scroll);
+    }
+    if device.config_accel_is_available() {
+        let _ = device.config_accel_set_speed(settings.accel_speed);
+    }
+}
+
+impl DrmLeaseHandler for EdexState<UdevData> {
     fn drm_lease_state(&mut self, node: DrmNode) -> &mut DrmLeaseState {
         self.backend_data
             .backends
@@ -591,14 +662,14 @@ impl DrmLeaseHandler for AnvilState<UdevData> {
     }
 }
 
-delegate_drm_lease!(AnvilState<UdevData>);
+delegate_drm_lease!(EdexState<UdevData>);
 
-impl DrmSyncobjHandler for AnvilState<UdevData> {
+impl DrmSyncobjHandler for EdexState<UdevData> {
     fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
         self.backend_data.syncobj_state.as_mut()
     }
 }
-smithay::delegate_drm_syncobj!(AnvilState<UdevData>);
+smithay::delegate_drm_syncobj!(EdexState<UdevData>);
 
 pub type RenderSurface =
     GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, Option<OutputPresentationFeedback>>;
@@ -615,6 +686,7 @@ struct SurfaceData {
     device_id: DrmNode,
     render_node: Option<DrmNode>,
     global: Option<GlobalId>,
+    connector: connector::Info,
     drm_output: DrmOutput<
         GbmAllocator<DrmDeviceFd>,
         GbmFramebufferExporter<DrmDeviceFd>,
@@ -630,7 +702,7 @@ struct SurfaceData {
 impl Drop for SurfaceData {
     fn drop(&mut self) {
         if let Some(global) = self.global.take() {
-            self.dh.remove_global::<AnvilState<UdevData>>(global);
+            self.dh.remove_global::<EdexState<UdevData>>(global);
         }
     }
 }
@@ -732,7 +804,7 @@ fn get_surface_dmabuf_feedback(
     })
 }
 
-impl AnvilState<UdevData> {
+impl EdexState<UdevData> {
     fn device_added(&mut self, node: DrmNode, path: &Path) -> Result<(), DeviceAddError> {
         // Try to open the device
         let fd = self
@@ -754,7 +826,7 @@ impl AnvilState<UdevData> {
             .handle
             .insert_source(
                 notifier,
-                move |event, metadata, data: &mut AnvilState<_>| match event {
+                move |event, metadata, data: &mut EdexState<_>| match event {
                     DrmEvent::VBlank(crtc) => {
                         data.frame_finish(node, crtc, metadata);
                     }
@@ -854,7 +926,7 @@ impl AnvilState<UdevData> {
                 non_desktop_connectors: Vec::new(),
                 render_node,
                 surfaces: HashMap::new(),
-                leasing_global: DrmLeaseState::new::<AnvilState<UdevData>>(
+                leasing_global: DrmLeaseState::new::<EdexState<UdevData>>(
                     &self.display_handle,
                     &node,
                 )
@@ -937,21 +1009,32 @@ impl AnvilState<UdevData> {
                 .non_desktop_connectors
                 .push((connector.handle(), crtc));
             if let Some(lease_state) = device.leasing_global.as_mut() {
-                lease_state.add_connector::<AnvilState<UdevData>>(
+                lease_state.add_connector::<EdexState<UdevData>>(
                     connector.handle(),
                     output_name,
                     format!("{} {}", make, model),
                 );
             }
         } else {
-            let mode_id = connector
+            let rule = self.config.output_rule(&output_name);
+            if rule.disabled {
+                info!("{output_name} is disabled in the display settings");
+                self.backend_data
+                    .disabled_connectors
+                    .push((node, connector, crtc));
+                return;
+            }
+            let Some(drm_mode) = pick_mode(&connector, rule.mode) else {
+                warn!("{output_name} has no modes");
+                return;
+            };
+            let wl_mode = WlMode::from(drm_mode);
+            let preferred = connector
                 .modes()
                 .iter()
-                .position(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
-                .unwrap_or(0);
-
-            let drm_mode = connector.modes()[mode_id];
-            let wl_mode = WlMode::from(drm_mode);
+                .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
+                .copied()
+                .unwrap_or(drm_mode);
 
             let (phys_w, phys_h) = connector.size().unwrap_or((0, 0));
             let output = Output::new(
@@ -963,15 +1046,23 @@ impl AnvilState<UdevData> {
                     model,
                 },
             );
-            let global = output.create_global::<AnvilState<UdevData>>(&self.display_handle);
+            let global = output.create_global::<EdexState<UdevData>>(&self.display_handle);
 
             let x = self.space.outputs().fold(0, |acc, o| {
-                acc + self.space.output_geometry(o).unwrap().size.w
+                acc + self.space.output_geometry(o).map(|g| g.size.w).unwrap_or(0)
             });
-            let position = (x, 0).into();
+            let position = rule.position.unwrap_or((x, 0)).into();
 
-            output.set_preferred(wl_mode);
-            output.change_current_state(Some(wl_mode), None, None, Some(position));
+            for mode in connector.modes() {
+                output.add_mode(WlMode::from(*mode));
+            }
+            output.set_preferred(WlMode::from(preferred));
+            output.change_current_state(
+                Some(wl_mode),
+                Some(crate::manage::transform_from_index(rule.transform)),
+                Some(smithay::output::Scale::Fractional(rule.scale)),
+                Some(position),
+            );
             self.space.map_output(&output, position);
 
             output.user_data().insert_if_missing(|| UdevOutputId {
@@ -1047,6 +1138,7 @@ impl AnvilState<UdevData> {
                 device_id: node,
                 render_node: device.render_node,
                 global: Some(global),
+                connector: connector.clone(),
                 drm_output,
                 disable_direct_scanout,
                 dmabuf_feedback,
@@ -1055,6 +1147,17 @@ impl AnvilState<UdevData> {
             };
 
             device.surfaces.insert(crtc, surface);
+            self.wm_output_added(&output);
+            if let Some(kelvin) = self.backend_data.gamma {
+                set_crtc_gamma(
+                    self.backend_data
+                        .backends
+                        .get(&node)
+                        .map(|b| b.drm_output_manager.device()),
+                    crtc,
+                    Some(kelvin),
+                );
+            }
 
             // kick-off rendering
             self.handle.insert_idle(move |state| {
@@ -1100,6 +1203,8 @@ impl AnvilState<UdevData> {
 
             if let Some(output) = output {
                 self.space.unmap_output(&output);
+                self.wm.remove_output(&output.name());
+                self.layout_dirty = true;
             }
         }
 
@@ -1157,7 +1262,7 @@ impl AnvilState<UdevData> {
         }
 
         // fixup window coordinates
-        crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
+        self.wm_outputs_changed();
     }
 
     fn device_removed(&mut self, node: DrmNode) {
@@ -1182,7 +1287,7 @@ impl AnvilState<UdevData> {
         // drop the backends on this side
         if let Some(mut backend_data) = self.backend_data.backends.remove(&node) {
             if let Some(mut leasing_global) = backend_data.leasing_global.take() {
-                leasing_global.disable_global::<AnvilState<UdevData>>();
+                leasing_global.disable_global::<EdexState<UdevData>>();
             }
 
             if let Some(render_node) = backend_data.render_node {
@@ -1194,7 +1299,7 @@ impl AnvilState<UdevData> {
             debug!("Dropping device");
         }
 
-        crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
+        self.wm_outputs_changed();
     }
 
     fn frame_finish(
@@ -1420,6 +1525,9 @@ impl AnvilState<UdevData> {
     }
 
     fn render_surface(&mut self, node: DrmNode, crtc: crtc::Handle, frame_target: Time<Monotonic>) {
+        if !self.backend_data.dpms_on {
+            return;
+        }
         let output = if let Some(output) = self.space.outputs().find(|o| {
             o.user_data().get::<UdevOutputId>()
                 == Some(&UdevOutputId {
@@ -1434,6 +1542,16 @@ impl AnvilState<UdevData> {
         };
 
         self.pre_repaint(&output, frame_target);
+
+        let lock_surface = self.lock_surface_for(&output);
+        let background = self.config.background;
+        let screen = if self.lock.locked {
+            Screen::Locked(lock_surface.as_ref())
+        } else {
+            Screen::Normal {
+                clear: Color32F::new(background[0], background[1], background[2], 1.0),
+            }
+        };
 
         let device = if let Some(device) = self.backend_data.backends.get_mut(&node) {
             device
@@ -1501,6 +1619,7 @@ impl AnvilState<UdevData> {
             &self.dnd_icon,
             &mut self.cursor_status,
             self.show_window_preview,
+            screen,
         );
         let reschedule = match result {
             Ok((has_rendered, states)) => {
@@ -1582,6 +1701,7 @@ fn render_surface<'a>(
     dnd_icon: &Option<DndIcon>,
     cursor_status: &mut CursorImageStatus,
     show_window_preview: bool,
+    screen: Screen<'_>,
 ) -> Result<(bool, RenderElementStates), SwapBuffersError> {
     let output_geometry = space.output_geometry(output).unwrap();
     let scale = Scale::from(output.current_scale().fractional_scale());
@@ -1657,6 +1777,7 @@ fn render_surface<'a>(
         custom_elements,
         renderer,
         show_window_preview,
+        screen,
     );
 
     let frame_mode = if surface.disable_direct_scanout {
@@ -1689,4 +1810,217 @@ fn render_surface<'a>(
     }
 
     Ok((rendered, states))
+}
+
+/// The connector mode a rule asks for: exact size (and refresh when given), else preferred.
+fn pick_mode(
+    connector: &connector::Info,
+    rule: crate::config::ModeRule,
+) -> Option<smithay::reexports::drm::control::Mode> {
+    let modes = connector.modes();
+    let preferred = modes
+        .iter()
+        .find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED))
+        .or(modes.first())
+        .copied();
+    match rule {
+        crate::config::ModeRule::Preferred => preferred,
+        crate::config::ModeRule::Exact { w, h, refresh_hz } => modes
+            .iter()
+            .filter(|m| m.size() == (w as u16, h as u16))
+            .min_by_key(|m| {
+                let hz = m.vrefresh() as f32;
+                ((refresh_hz.map(|r| (r - hz).abs()).unwrap_or(-hz)) * 1000.0) as i64
+            })
+            .copied()
+            .or(preferred),
+    }
+}
+
+/// Load a night-light gamma ramp into a CRTC.
+fn set_crtc_gamma(device: Option<&DrmDevice>, crtc: crtc::Handle, kelvin: Option<u32>) {
+    let Some(device) = device else {
+        return;
+    };
+    let Ok(info) = device.get_crtc(crtc) else {
+        return;
+    };
+    let size = info.gamma_length() as usize;
+    if size == 0 {
+        return;
+    }
+    let (r, g, b) = crate::gamma::ramps(size, kelvin);
+    if let Err(e) = device.set_gamma(crtc, &r, &g, &b) {
+        warn!("setting gamma on {crtc:?}: {e}");
+    }
+}
+
+impl EdexState<UdevData> {
+    fn udev_set_gamma(&mut self, kelvin: Option<u32>) {
+        self.backend_data.gamma = kelvin;
+        for backend in self.backend_data.backends.values() {
+            for crtc in backend.surfaces.keys() {
+                set_crtc_gamma(Some(backend.drm_output_manager.device()), *crtc, kelvin);
+            }
+        }
+    }
+
+    fn udev_set_dpms(&mut self, on: bool) {
+        if self.backend_data.dpms_on == on {
+            return;
+        }
+        self.backend_data.dpms_on = on;
+        let mut nodes = Vec::new();
+        for (node, backend) in self.backend_data.backends.iter_mut() {
+            for surface in backend.surfaces.values_mut() {
+                if !on {
+                    if let Err(e) = surface.drm_output.with_compositor(|c| c.clear()) {
+                        warn!("turning the display off: {e}");
+                    }
+                } else {
+                    surface.drm_output.reset_buffers();
+                }
+            }
+            nodes.push(*node);
+        }
+        if on {
+            for node in nodes {
+                self.handle
+                    .insert_idle(move |state| state.render(node, None, state.clock.now()));
+            }
+        }
+    }
+
+    /// Re-apply output rules: scale, transform and position change live; a new mode is set
+    /// through a modeset; enabling or disabling an output re-runs connector setup.
+    fn udev_apply_output_config(&mut self) {
+        // Outputs switched off by the settings.
+        let mut to_disable = Vec::new();
+        for (node, backend) in self.backend_data.backends.iter() {
+            for (crtc, surface) in backend.surfaces.iter() {
+                let name = format!(
+                    "{}-{}",
+                    surface.connector.interface().as_str(),
+                    surface.connector.interface_id()
+                );
+                if self.config.output_rule(&name).disabled {
+                    to_disable.push((*node, surface.connector.clone(), *crtc));
+                }
+            }
+        }
+        for (node, connector, crtc) in to_disable {
+            self.connector_disconnected(node, connector.clone(), crtc);
+            self.backend_data
+                .disabled_connectors
+                .push((node, connector, crtc));
+        }
+        // Outputs switched back on.
+        let pending = std::mem::take(&mut self.backend_data.disabled_connectors);
+        for (node, connector, crtc) in pending {
+            self.connector_connected(node, connector, crtc);
+        }
+
+        let outputs: Vec<Output> = self.space.outputs().cloned().collect();
+        let mut x = 0;
+        for output in outputs {
+            let rule = self.config.output_rule(&output.name());
+            let Some(id) = output.user_data().get::<UdevOutputId>() else {
+                continue;
+            };
+            let (node, crtc) = (id.device_id, id.crtc);
+            // Mode
+            let wanted = self
+                .backend_data
+                .backends
+                .get(&node)
+                .and_then(|b| b.surfaces.get(&crtc))
+                .and_then(|s| pick_mode(&s.connector, rule.mode));
+            if let Some(mode) = wanted {
+                let wl_mode = WlMode::from(mode);
+                if output.current_mode() != Some(wl_mode) {
+                    let render_node = self
+                        .backend_data
+                        .backends
+                        .get(&node)
+                        .and_then(|b| b.render_node)
+                        .unwrap_or(self.backend_data.primary_gpu);
+                    if let (Ok(mut renderer), Some(surface)) = (
+                        self.backend_data.gpus.single_renderer(&render_node),
+                        self.backend_data
+                            .backends
+                            .get_mut(&node)
+                            .and_then(|b| b.surfaces.get_mut(&crtc)),
+                    ) {
+                        match surface.drm_output.use_mode::<_, OutputRenderElements<
+                            UdevRenderer<'_>,
+                            WindowRenderElement<UdevRenderer<'_>>,
+                        >>(
+                            mode,
+                            &mut renderer,
+                            &DrmOutputRenderElements::default(),
+                        ) {
+                            Ok(()) => output.change_current_state(Some(wl_mode), None, None, None),
+                            Err(e) => warn!("mode change on {} failed: {e}", output.name()),
+                        }
+                    }
+                }
+            }
+            let position = rule.position.unwrap_or((x, 0));
+            output.change_current_state(
+                None,
+                Some(crate::manage::transform_from_index(rule.transform)),
+                Some(smithay::output::Scale::Fractional(rule.scale)),
+                Some(position.into()),
+            );
+            self.space.map_output(&output, position);
+            if let Some(geo) = self.space.output_geometry(&output) {
+                x = x.max(geo.loc.x + geo.size.w);
+            }
+            self.backend_data.reset_buffers(&output);
+        }
+        self.wm_outputs_changed();
+    }
+
+    fn udev_screenshot(
+        &mut self,
+        output: Option<&str>,
+        region: Option<Rectangle<i32, Logical>>,
+        path: &str,
+    ) -> anyhow::Result<()> {
+        let target = match (output, region) {
+            (Some(name), _) => self.space.outputs().find(|o| o.name() == name).cloned(),
+            (None, Some(r)) => self
+                .space
+                .outputs()
+                .find(|o| self.space.output_geometry(o).is_some_and(|g| g.overlaps(r)))
+                .cloned(),
+            (None, None) => self
+                .wm
+                .focused_output_name()
+                .and_then(|n| self.space.outputs().find(|o| o.name() == n))
+                .cloned(),
+        }
+        .ok_or_else(|| anyhow::anyhow!("no such output"))?;
+        let background = self.config.background;
+        let clear = Color32F::new(background[0], background[1], background[2], 1.0);
+        let primary = self.backend_data.primary_gpu;
+        let mut renderer = self
+            .backend_data
+            .gpus
+            .single_renderer(&primary)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let img = crate::screenshot::capture::<_, smithay::backend::renderer::gles::GlesTexture>(
+            &mut renderer,
+            &target,
+            &self.space,
+            clear,
+        )?;
+        let img = match (region, self.space.output_geometry(&target)) {
+            (Some(r), Some(geo)) => {
+                crate::screenshot::crop(img, geo, target.current_scale().fractional_scale(), r)?
+            }
+            _ => img,
+        };
+        crate::screenshot::save(&img, path)
+    }
 }
