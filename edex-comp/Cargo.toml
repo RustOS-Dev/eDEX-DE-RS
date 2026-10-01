@@ -1,0 +1,52 @@
+[package]
+name = "edex-comp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The eDEX Wayland compositor for RustOS: tiles applications into the shell's centre panel"
+
+[[bin]]
+name = "edex-comp"
+path = "src/main.rs"
+
+[dependencies]
+comp-proto = { path = "../comp-proto" }
+settings = { path = "../settings" }
+anyhow = { workspace = true }
+bitflags = "2"
+clap = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+xcursor = "0.3.3"
+xkbcommon = "0.8"
+x11rb = { version = "0.13", default-features = false, features = ["composite"] }
+smithay-drm-extras = { version = "0.1", default-features = false }
+image = { workspace = true }
+
+[dependencies.smithay]
+version = "0.7"
+default-features = false
+features = [
+    "desktop",
+    "wayland_frontend",
+    "use_system_lib",
+    "backend_egl",
+    "backend_libinput",
+    "backend_udev",
+    "backend_drm",
+    "backend_gbm",
+    "backend_vulkan",
+    "backend_session_libseat",
+    "backend_winit",
+    "renderer_gl",
+    "renderer_pixman",
+    "renderer_multi",
+    "xwayland",
+    "x11rb_event_source",
+]
