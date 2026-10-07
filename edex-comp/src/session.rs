@@ -186,9 +186,15 @@ pub fn program(user: &User, env: &[(String, String)], program: &str, args: &[&st
 }
 
 fn prepare(cmd: &mut Command, user: &User, env: &[(String, String)]) {
+    // A home directory that does not exist (RustOS's root account) must not stop the program.
+    let dir = if user.home.is_dir() {
+        user.home.as_path()
+    } else {
+        Path::new("/")
+    };
     cmd.env_clear()
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .current_dir(&user.home)
+        .current_dir(dir)
         .stdin(Stdio::null());
     let (uid, gid) = (user.uid, user.gid);
     let name = CString::new(user.name.clone()).unwrap_or_default();

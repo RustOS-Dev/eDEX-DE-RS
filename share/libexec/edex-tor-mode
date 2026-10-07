@@ -16,6 +16,10 @@ if [ -d /storage/etc ]; then
     data=/storage/var/lib/tor
 fi
 
+# GeoIP files from the RustOS tor port (/usr/local/share/tor), else a system Tor's.
+share=/usr/local/share/tor
+[ -r "$share/geoip" ] || share=/usr/share/tor
+
 write_torrc() {
     mkdir -p "$dir/torrc.d" /run/tor "$data"
     chmod 700 "$data"
@@ -27,8 +31,8 @@ CookieAuthentication 1
 CookieAuthFile /run/tor/control.authcookie
 CookieAuthFileGroupReadable 1
 DataDirectory $data
-GeoIPFile /usr/share/tor/geoip
-GeoIPv6File /usr/share/tor/geoip6
+GeoIPFile $share/geoip
+GeoIPv6File $share/geoip6
 %include $dir/torrc.d/*.conf
 CONF
 }

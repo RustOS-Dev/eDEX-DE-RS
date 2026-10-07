@@ -1,6 +1,6 @@
-# /etc/edex-greeter/greeter.toml — every key is optional.
+# /usr/local/etc/edex-greeter/greeter.toml (or /etc/edex-greeter/greeter.toml) — every key is optional.
 theme = "tron"
-# background = "/usr/share/edex-de/backgrounds/hexgrid-1080p.png"
+# background = "/usr/local/share/edex-de/backgrounds/hexgrid-1080p.png"
 default_session = "edex-de"
 show_users = true
 power_buttons = true

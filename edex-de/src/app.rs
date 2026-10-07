@@ -1297,6 +1297,8 @@ impl App {
         match self.config.terminal.bell.as_str() {
             "audible" => {
                 for p in [
+                    "/usr/local/share/sounds/freedesktop/stereo/bell.oga",
+                    "/usr/local/share/sounds/freedesktop/stereo/message.oga",
                     "/usr/share/sounds/freedesktop/stereo/bell.oga",
                     "/usr/share/sounds/freedesktop/stereo/message.oga",
                 ] {

@@ -67,10 +67,19 @@ fn main() {
 }
 
 fn run_compositor(nested: bool, greeter: bool, run: Vec<String>) -> Result<()> {
+    if nested && !cfg!(feature = "gpu") {
+        bail!(
+            "--nested needs GPU rendering (EGL), and this edex-comp was built without the `gpu` \
+             feature; run it on a VT instead"
+        );
+    }
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    // Plain text when the log goes to a file (`edex-comp … > edex.log`).
+    use std::io::IsTerminal;
     tracing_subscriber::fmt()
         .compact()
+        .with_ansi(std::io::stdout().is_terminal())
         .with_env_filter(filter)
         .init();
 
@@ -100,6 +109,7 @@ fn run_compositor(nested: bool, greeter: bool, run: Vec<String>) -> Result<()> {
     };
     if nested {
         tracing::info!("starting nested (winit)");
+        #[cfg(feature = "gpu")]
         edex_comp::winit::run_winit(opts);
     } else {
         tracing::info!("starting on this seat (DRM/KMS, libinput)");

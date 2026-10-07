@@ -32,6 +32,19 @@ x11rb = { version = "0.13", default-features = false, features = ["composite"] }
 smithay-drm-extras = { version = "0.1", default-features = false }
 image = { workspace = true }
 
+[features]
+# GPU rendering through Mesa: GBM/EGL with the GLES renderer on DRM, and the nested (winit)
+# backend. Without it edex-comp renders with pixman into DRM dumb buffers and needs neither
+# libgbm nor libEGL (RustOS until Mesa arrives with M41).
+default = ["gpu"]
+gpu = [
+    "smithay/backend_egl",
+    "smithay/backend_gbm",
+    "smithay/backend_winit",
+    "smithay/renderer_gl",
+    "smithay/renderer_multi",
+]
+
 [dependencies.smithay]
 version = "0.7"
 default-features = false
@@ -39,17 +52,11 @@ features = [
     "desktop",
     "wayland_frontend",
     "use_system_lib",
-    "backend_egl",
     "backend_libinput",
     "backend_udev",
     "backend_drm",
-    "backend_gbm",
-    "backend_vulkan",
     "backend_session_libseat",
-    "backend_winit",
-    "renderer_gl",
     "renderer_pixman",
-    "renderer_multi",
     "xwayland",
     "x11rb_event_source",
 ]

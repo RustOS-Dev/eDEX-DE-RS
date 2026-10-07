@@ -1,5 +1,5 @@
 //! Sessions edex-comp can start. On RustOS that is the eDEX desktop; session files in
-//! /usr/share/wayland-sessions that name edex-de are listed too (e.g. a safe-mode variant).
+//! /usr/local/share/wayland-sessions and /usr/share/wayland-sessions that name edex-de are listed too (e.g. a safe-mode variant).
 
 use std::path::PathBuf;
 
@@ -81,8 +81,8 @@ pub fn scan(dirs: &[(PathBuf, bool)]) -> Vec<Session> {
 
 pub fn default_dirs() -> Vec<(PathBuf, bool)> {
     vec![
-        (PathBuf::from("/usr/share/wayland-sessions"), false),
         (PathBuf::from("/usr/local/share/wayland-sessions"), false),
+        (PathBuf::from("/usr/share/wayland-sessions"), false),
         (PathBuf::from("/usr/share/xsessions"), true),
     ]
 }

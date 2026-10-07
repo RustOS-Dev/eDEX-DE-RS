@@ -10,16 +10,17 @@ system dashboard, launcher, settings, privacy panel, notifications, power menu, 
 screens), and the compositor, **edex-comp**, tiles applications into the shell's centre panel next
 to its terminal tabs.
 
-eDEX-DE targets RustOS once its desktop milestones are in place: DRM/KMS and Mesa (M35, M38–M41),
-the desktop kernel features (M36), the Wayland stack (M37) and the desktop services of M42
-(seatd, D-Bus, PipeWire, UPower, `rustos-nmd`). [docs/rustos.md](docs/rustos.md) lists exactly
-what it needs from RustOS.
+eDEX-DE targets RustOS. Its compositor runs there today, on DRM/KMS (M35), the desktop kernel
+features (M36) and the Wayland stack (M37), rendering with pixman until Mesa arrives (M41); the
+shell and the greeter draw with wgpu and wait for Mesa, and the full session for the desktop
+services of M42 (seatd, D-Bus, PipeWire, UPower, `rustos-nmd`). [docs/rustos.md](docs/rustos.md)
+lists exactly what it needs from RustOS.
 
 ## What you get
 
 | Part | Implementation |
 |---|---|
-| Compositor | `edex-comp`, built on Smithay: DRM/KMS with GBM/EGL (Mesa, including `kms_swrast` on efidrm), libinput, libseat, Xwayland. Tiles windows into the shell's centre panel, with workspaces per output, maximize, fullscreen, floating, minimize-to-tab and a scratchpad |
+| Compositor | `edex-comp`, built on Smithay: DRM/KMS with GBM/EGL (Mesa, including its software rasterizer), or pixman on dumb buffers without Mesa; libinput, libseat, Xwayland. Tiles windows into the shell's centre panel, with workspaces per output, maximize, fullscreen, floating, minimize-to-tab and a scratchpad |
 | Terminal | Multi-tab terminal on `alacritty_terminal` (alt screen, scroll regions, mouse reporting, bracketed paste, OSC 52, selection, scrollback), running RustOS's `sh` |
 | Files | Clickable file browser with breadcrumbs, dotfiles toggle, open-in-terminal, `xdg-open` |
 | Dashboard | CPU per core, memory, network sparklines, disks, processes; privacy indicators for Tor, VPN, WireGuard, microphone and camera |
@@ -35,16 +36,32 @@ what it needs from RustOS.
 
 ## Install on RustOS
 
-RustOS builds eDEX-DE from source in its ports tree:
+RustOS builds eDEX-DE from source in its ports tree and installs it under `/usr/local`, like its
+Wayland stack (RustOS's `docs/DESKTOP.md`):
 
 ```bash
-# in a RustOS checkout: build the image with the desktop ports (ports/desktop.list)
-RUSTOS_DESKTOP=1 cargo build && ./write_to_drive.sh --drive /dev/sdX
-# a local eDEX-DE checkout instead of the pinned commit:
-EDEX_SRC=$HOME/eDEX-DE-RS RUSTOS_DESKTOP=1 cargo build
+# in a RustOS checkout
+git submodule update --init third_party/musl
+rustup target add x86_64-unknown-linux-musl
+tools/install-port.sh --initramfs weston       # Wayland, libinput, seatd, pixman, ...
+tools/install-port.sh --initramfs libunwind    # libgcc_s.so.1 for dynamically linked Rust
+tools/install-port.sh --initramfs edex-de      # EDEX_SRC=$HOME/eDEX-DE-RS for a local checkout
+tools/install-port.sh --initramfs jetbrains-mono-nerd
+cargo build --features linux-drivers           # DRM (bochs, virtio-gpu, simpledrm) and input
+./write_to_drive.sh --drive /dev/sdX
 ```
 
-On the running system, turn the desktop on (it runs on tty1 and starts at every boot):
+The port builds `edex-comp` without its `gpu` feature: it renders with pixman into DRM dumb
+buffers and needs neither GBM nor EGL. Run it from a console with a client of your choice:
+
+```sh
+mkdir -p /tmp/xdg; chmod 700 /tmp/xdg
+export XDG_RUNTIME_DIR=/tmp/xdg LIBSEAT_BACKEND=builtin
+edex-comp run --run weston-terminal &
+```
+
+`edex-de` and `edex-greeter` are installed too but draw with wgpu, which needs Mesa (RustOS M41).
+From then on the desktop is turned on with the `edex` service (tty1, every boot):
 
 ```sh
 svc enable edex && svc start edex
@@ -71,6 +88,8 @@ EDEX_SHARE_DIR=$PWD/share cargo run -p edex-comp -- run --nested
 cargo run -p edex-comp -- run --nested --run foot
 # The greeter without a compositor:
 cargo run -p edex-greeter -- --demo
+# edex-comp as RustOS builds it (pixman, no GBM/EGL; no nested mode):
+cargo build -p edex-comp --no-default-features
 ```
 
 ## How a session starts
@@ -241,7 +260,7 @@ tor_mode_on_login = false
 | `edex-auth/` | Password checks and account edits (no PAM on RustOS) |
 | `platform/`, `renderer/`, `ui/`, `terminal/` | Wayland client, wgpu renderer, scene/layout, terminal |
 | `system/`, `sysmon/`, `notifications/`, `launcher/`, `settings/`, `ipc/` | Backends, monitoring, notification server, launcher, config, shell IPC |
-| `share/libexec/` | Helpers installed to `/usr/libexec/edex-de` (Tor mode and bridges) |
+| `share/libexec/` | Helpers installed to `/usr/local/libexec/edex-de` (Tor mode and bridges) |
 | `themes/`, `assets/`, `packaging/` | Themes, artwork, greeter config and desktop entries |
 
 See [docs/architecture.md](docs/architecture.md), [docs/compositor.md](docs/compositor.md),

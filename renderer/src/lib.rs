@@ -5,7 +5,9 @@ mod text;
 
 use anyhow::{anyhow, Context, Result};
 use glyphon::{Cache, FontSystem, SwashCache, TextAtlas, TextRenderer, Viewport};
-use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
+use raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, RawDisplayHandle, RawWindowHandle,
+};
 use tracing::{info, warn};
 use ui::{layout::Metrics, scene::Scene};
 
@@ -13,9 +15,54 @@ use rects::{RectPipeline, ScanParams, ScanlinePipeline};
 pub use text::measure_mono;
 use text::TextCache;
 
+/// Font directories loaded even when fontconfig's configuration does not list them. fontdb reads
+/// fontconfig's file only from `/etc/fonts`; RustOS's fontconfig port keeps it under
+/// `/usr/local/etc/fonts`, with DejaVu in `/usr/share/fonts` and the font ports (JetBrains Mono
+/// Nerd Font) in `/usr/local/share/fonts`.
+const SYSTEM_FONT_DIRS: [&str; 2] = ["/usr/local/share/fonts", "/usr/share/fonts"];
+
+/// The system fonts, plus [`SYSTEM_FONT_DIRS`] and `~/.local/share/fonts` when fontconfig did not
+/// cover them.
+fn font_system() -> FontSystem {
+    use glyphon::fontdb::Source;
+    let (locale, mut db) = FontSystem::new().into_locale_and_db();
+    let mut dirs: Vec<std::path::PathBuf> = SYSTEM_FONT_DIRS.iter().map(Into::into).collect();
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(std::path::Path::new(&home).join(".local/share/fonts"));
+    }
+    for dir in dirs {
+        let covered = db.faces().any(|f| match &f.source {
+            Source::File(p) => p.starts_with(&dir),
+            Source::SharedFile(p, _) => p.starts_with(&dir),
+            Source::Binary(_) => false,
+        });
+        if !covered && dir.is_dir() {
+            db.load_fonts_dir(&dir);
+        }
+    }
+    FontSystem::new_with_locale_and_db(locale, db)
+}
+
+/// The Wayland display a [`GpuContext`]'s instance presents on.
+#[derive(Debug)]
+struct Display(RawDisplayHandle);
+
+// SAFETY: the handle is a `wl_display` pointer that the platform's connection keeps alive for
+// the life of the process, and libwayland-client is thread-safe.
+unsafe impl Send for Display {}
+unsafe impl Sync for Display {}
+
+impl HasDisplayHandle for Display {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        // SAFETY: see above; the display outlives the instance.
+        Ok(unsafe { DisplayHandle::borrow_raw(self.0) })
+    }
+}
+
 /// Shared GPU device, font system and glyph cache; one per process.
 pub struct GpuContext {
-    pub instance: wgpu::Instance,
+    /// Created with the first surface: wgpu's GLES backend needs the Wayland display to present.
+    instance: Option<wgpu::Instance>,
     pub adapter: Option<wgpu::Adapter>,
     pub device: Option<wgpu::Device>,
     pub queue: Option<wgpu::Queue>,
@@ -27,11 +74,7 @@ pub struct GpuContext {
 
 impl GpuContext {
     pub fn new(font_family: Option<String>) -> Self {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let font_system = FontSystem::new();
+        let font_system = font_system();
         if let Some(fam) = &font_family {
             let available = font_system
                 .db()
@@ -42,7 +85,7 @@ impl GpuContext {
             }
         }
         Self {
-            instance,
+            instance: None,
             adapter: None,
             device: None,
             queue: None,
@@ -76,17 +119,34 @@ impl GpuContext {
         })
     }
 
+    /// The wgpu instance, connected to the display the surfaces live on. Vulkan and GLES (EGL
+    /// on Wayland); `WGPU_BACKEND` and the other wgpu variables override the defaults.
+    fn instance(&mut self, display: RawDisplayHandle) -> &wgpu::Instance {
+        self.instance.get_or_insert_with(|| {
+            wgpu::Instance::new(
+                wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+                    ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(Display(display)))
+                }
+                .with_env(),
+            )
+        })
+    }
+
     fn ensure_device(&mut self, surface: &wgpu::Surface<'static>) -> Result<()> {
         if self.device.is_some() {
             return Ok(());
         }
-        let adapter =
-            pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                force_fallback_adapter: false,
-                compatible_surface: Some(surface),
-            }))
-            .map_err(|e| anyhow!("no compatible GPU adapter: {e}"))?;
+        let instance = self
+            .instance
+            .as_ref()
+            .ok_or_else(|| anyhow!("no wgpu instance"))?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: Some(surface),
+        }))
+        .map_err(|e| anyhow!("no compatible GPU adapter: {e}"))?;
         let info = adapter.get_info();
         info!(name = %info.name, backend = ?info.backend, kind = ?info.device_type, "gpu adapter selected");
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -144,7 +204,7 @@ impl SurfaceRenderer {
         scale: f32,
     ) -> Result<Self> {
         let surface = unsafe {
-            ctx.instance
+            ctx.instance(handles.0)
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                     raw_display_handle: Some(handles.0),
                     raw_window_handle: handles.1,

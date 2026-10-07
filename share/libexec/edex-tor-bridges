@@ -36,7 +36,9 @@ case "${1:-}" in
     snowflake)
         pt=$(find_pt snowflake-client) || { echo "snowflake-client is not installed" >&2; exit 1; }
         # The snowflake port ships the current default bridge line (broker URL, fronts, STUN).
-        line=/usr/share/tor/snowflake-bridge.conf
+        line=/usr/local/share/tor/snowflake-bridge.conf
+        [ -r "$line" ] || [ ! -r /usr/share/tor/snowflake-bridge.conf ] ||
+            line=/usr/share/tor/snowflake-bridge.conf
         [ -r "$line" ] || { echo "$line is missing (reinstall the tor-pt port)" >&2; exit 1; }
         {
             echo "UseBridges 1"

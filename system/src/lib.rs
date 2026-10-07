@@ -387,7 +387,14 @@ fn handle(
             vec![done("night-light", display::reload(comp))]
         }
         Q::InputLayouts => vec![SysReply::InputLayouts(input::layouts(
-            "/usr/share/X11/xkb/rules/evdev.xml",
+            // xkeyboard-config: the RustOS weston port installs it under /usr/local.
+            [
+                "/usr/local/share/X11/xkb/rules/evdev.xml",
+                "/usr/share/X11/xkb/rules/evdev.xml",
+            ]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or("/usr/share/X11/xkb/rules/evdev.xml"),
         ))],
         Q::ApplyInput { .. } => {
             // Saved in config.toml by the settings panel; edex-comp applies it.

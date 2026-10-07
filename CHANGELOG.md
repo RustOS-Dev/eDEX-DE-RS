@@ -26,6 +26,17 @@ the `edex` service. It needs RustOS's graphics and desktop milestones; see
   suspend (shown as unavailable).
 * The shell no longer creates reserver surfaces; it sends `set-app-area` to edex-comp instead.
   The `scrolling` layout is gone.
+* **edex-comp renders without Mesa.** Built without its new default `gpu` feature (as the RustOS
+  port does until Mesa, M41) it renders with pixman into DRM dumb buffers and links neither libgbm
+  nor libEGL; a `gpu` build falls back to pixman when GBM/EGL cannot start, and accepts Mesa's
+  software rasterizer instead of rejecting it. Without the shell, windows tile over the whole
+  output. The log names the renderer and each enabled output.
+* **Installed under `/usr/local` on RustOS**: themes, greeter configuration, Tor helpers, session
+  files, keyboard layouts, sounds and Tor's GeoIP/bridge files are looked up in `/usr/local` first,
+  then `/usr`. The shell also loads `/usr/local/share/fonts` and `/usr/share/fonts` when
+  fontconfig's file is not in `/etc/fonts`.
+* wgpu gets the Wayland display (its GLES backend needs it to present) and honours `WGPU_BACKEND`
+  and the other wgpu environment variables.
 
 ## 3.2.0 — 2026-10-01
 

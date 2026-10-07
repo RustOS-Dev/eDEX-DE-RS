@@ -3243,7 +3243,6 @@ checksum = "740cea6927892bc182d5bf70c8f79806c8bc9f68f2fb96e55a30be171b63af98"
 dependencies = [
  "aliasable",
  "appendlist",
- "ash",
  "atomic_float",
  "bitflags 2.13.2",
  "calloop 0.14.4",

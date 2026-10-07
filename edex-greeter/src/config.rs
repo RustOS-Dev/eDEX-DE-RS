@@ -1,3 +1,4 @@
+//! `/usr/local/etc/edex-greeter/greeter.toml` (the RustOS port) or
 //! `/etc/edex-greeter/greeter.toml`.
 
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct GreeterConfig {
-    /// Theme name from /usr/share/edex-de/themes.
+    /// Theme name from the eDEX themes (`/usr/local/share/edex-de/themes` on RustOS).
     pub theme: String,
     /// Optional PNG background; the hex grid is drawn when absent.
     pub background: Option<PathBuf>,
@@ -41,7 +42,29 @@ impl Default for GreeterConfig {
     }
 }
 
-pub const DEFAULT_PATH: &str = "/etc/edex-greeter/greeter.toml";
+/// Where the greeter configuration is looked for, in order.
+pub const DEFAULT_PATHS: [&str; 2] = [
+    "/usr/local/etc/edex-greeter/greeter.toml",
+    "/etc/edex-greeter/greeter.toml",
+];
+
+/// The first of `candidates` that exists, else the last one.
+pub fn first_existing<P: Into<PathBuf>>(candidates: impl IntoIterator<Item = P>) -> PathBuf {
+    let mut last = PathBuf::new();
+    for c in candidates {
+        let c = c.into();
+        if c.exists() {
+            return c;
+        }
+        last = c;
+    }
+    last
+}
+
+/// The configuration file: the first of [`DEFAULT_PATHS`] that exists.
+pub fn default_path() -> PathBuf {
+    first_existing(DEFAULT_PATHS)
+}
 
 pub fn load(path: &Path) -> GreeterConfig {
     match std::fs::read_to_string(path) {

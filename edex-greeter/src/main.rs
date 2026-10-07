@@ -32,7 +32,7 @@ use xkbcommon::xkb::keysyms as ks;
 #[command(name = "edex-greeter", version, about = "eDEX login and lock screen")]
 struct Cli {
     /// Configuration file.
-    #[arg(long, default_value = config::DEFAULT_PATH)]
+    #[arg(long, default_value_os_t = config::default_path())]
     config: PathBuf,
     /// Be the lock screen of the running session.
     #[arg(long)]
@@ -552,8 +552,11 @@ fn run(cli: Cli) -> Result<i32> {
     Ok(g.exit_code)
 }
 
+/// `$EDEX_SHARE_DIR`, `/usr/local/share/edex-de` or `/usr/share/edex-de`: the first that exists.
 fn settings_share_dir() -> PathBuf {
-    std::env::var_os("EDEX_SHARE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/usr/share/edex-de"))
+    let env = std::env::var_os("EDEX_SHARE_DIR").map(PathBuf::from);
+    config::first_existing(
+        env.into_iter()
+            .chain(["/usr/local/share/edex-de", "/usr/share/edex-de"].map(PathBuf::from)),
+    )
 }

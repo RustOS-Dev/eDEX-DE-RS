@@ -1,4 +1,4 @@
-//! Tor, Tailscale, VPN and DNS. Tor is switched by the eDEX helpers in /usr/libexec/edex-de
+//! Tor, Tailscale, VPN and DNS. Tor is switched by the eDEX helpers in /usr/local/libexec/edex-de
 //! (they edit torrc and drive the `svc` service); Tailscale works when its CLI is installed.
 
 use std::{
@@ -94,8 +94,17 @@ fn control_port(cmd: &str) -> Result<String> {
     Ok(out)
 }
 
-/// Privileged helpers shipped with eDEX-DE.
-const HELPERS: &str = "/usr/libexec/edex-de";
+/// Privileged helpers shipped with eDEX-DE: `/usr/local/libexec/edex-de` (the RustOS port) or
+/// `/usr/libexec/edex-de`.
+const HELPER_DIRS: [&str; 2] = ["/usr/local/libexec/edex-de", "/usr/libexec/edex-de"];
+
+fn helper(name: &str) -> String {
+    HELPER_DIRS
+        .iter()
+        .map(|d| format!("{d}/{name}"))
+        .find(|p| std::path::Path::new(p).exists())
+        .unwrap_or_else(|| format!("{}/{name}", HELPER_DIRS[1]))
+}
 
 fn installed(program: &str) -> bool {
     ["/usr/local/bin", "/usr/bin", "/bin"]
@@ -173,8 +182,7 @@ pub fn tor_set_mode(r: &dyn CommandRunner, mode: &str) -> Result<()> {
     if !["off", "socks5"].contains(&mode) {
         return Err(anyhow!("invalid tor mode {mode} (off or socks5)"));
     }
-    r.run_ok(&format!("{HELPERS}/edex-tor-mode"), &[mode])
-        .map(|_| ())
+    r.run_ok(&helper("edex-tor-mode"), &[mode]).map(|_| ())
 }
 
 pub fn tor_newnym() -> Result<()> {
@@ -185,11 +193,7 @@ pub fn tor_newnym() -> Result<()> {
 pub fn tor_bridges(r: &dyn CommandRunner, kind: &str, lines: &str) -> Result<()> {
     match kind {
         "obfs4" => r
-            .run_with_stdin(
-                &format!("{HELPERS}/edex-tor-bridges"),
-                &["obfs4", "--stdin"],
-                lines,
-            )
+            .run_with_stdin(&helper("edex-tor-bridges"), &["obfs4", "--stdin"], lines)
             .and_then(|o| {
                 if o.ok() {
                     Ok(())
@@ -197,9 +201,7 @@ pub fn tor_bridges(r: &dyn CommandRunner, kind: &str, lines: &str) -> Result<()>
                     Err(anyhow!("{}", o.stderr.trim()))
                 }
             }),
-        "snowflake" | "clear" => r
-            .run_ok(&format!("{HELPERS}/edex-tor-bridges"), &[kind])
-            .map(|_| ()),
+        "snowflake" | "clear" => r.run_ok(&helper("edex-tor-bridges"), &[kind]).map(|_| ()),
         other => Err(anyhow!("unknown bridge kind {other}")),
     }
 }

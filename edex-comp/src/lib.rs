@@ -7,6 +7,7 @@ pub mod config;
 pub mod control;
 pub mod cursor;
 pub mod drawing;
+pub mod dumb;
 pub mod edid;
 pub mod focus;
 pub mod gamma;
@@ -20,6 +21,7 @@ pub mod session;
 pub mod shell;
 pub mod state;
 pub mod udev;
+#[cfg(feature = "gpu")]
 pub mod winit;
 pub mod wm;
 

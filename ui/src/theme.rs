@@ -1,4 +1,5 @@
-//! Theme definitions loaded from TOML (`/usr/share/edex-de/themes`, `~/.config/edex-de/themes`).
+//! Theme definitions loaded from TOML (`/usr/local/share/edex-de/themes` or
+//! `/usr/share/edex-de/themes`, and `~/.config/edex-de/themes`).
 
 use std::{collections::BTreeMap, fs, path::Path};
 

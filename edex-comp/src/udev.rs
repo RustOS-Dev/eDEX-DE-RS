@@ -7,6 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "gpu")]
+use crate::shell::WindowRenderElement;
 use crate::{
     drawing::*,
     render::*,
@@ -16,34 +18,50 @@ use crate::{
     },
 };
 use crate::{
-    shell::WindowRenderElement,
+    dumb::{DumbError, DumbOutput},
     state::{DndIcon, SurfaceDmabufFeedback},
 };
-use smithay::backend::renderer::{Color32F, ImportEgl};
+use smithay::backend::renderer::Color32F;
+#[cfg(feature = "gpu")]
+use smithay::backend::{
+    allocator::{
+        format::FormatSet,
+        gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
+        Modifier,
+    },
+    drm::{
+        compositor::FrameFlags,
+        exporter::gbm::GbmFramebufferExporter,
+        output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
+        DrmSurface,
+    },
+    egl::{self, context::ContextPriority, EGLDevice, EGLDisplay},
+    renderer::{
+        damage::Error as OutputDamageTrackerError,
+        gles::GlesRenderer,
+        multigpu::{gbm::GbmGlesBackend, GpuManager, MultiRenderer},
+        DebugFlags, ImportDma, ImportEgl,
+    },
+};
+#[cfg(feature = "gpu")]
+use smithay::reexports::drm::Device as _;
+#[cfg(feature = "gpu")]
+use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1;
+#[cfg(feature = "gpu")]
+use smithay::wayland::{dmabuf::DmabufFeedbackBuilder, drm_syncobj::supports_syncobj_eventfd};
 use smithay::{
     backend::{
-        allocator::{
-            dmabuf::Dmabuf,
-            format::FormatSet,
-            gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-            Fourcc, Modifier,
-        },
+        allocator::{dmabuf::Dmabuf, Fourcc},
         drm::{
-            compositor::{DrmCompositor, FrameFlags},
-            exporter::gbm::GbmFramebufferExporter,
-            output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements},
             CreateDrmNodeError, DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent,
-            DrmEventMetadata, DrmEventTime, DrmNode, DrmSurface, GbmBufferedSurface, NodeType,
+            DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
         },
-        egl::{self, context::ContextPriority, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
-            damage::Error as OutputDamageTrackerError,
             element::{memory::MemoryRenderBuffer, AsRenderElements, RenderElementStates},
-            gles::GlesRenderer,
-            multigpu::{gbm::GbmGlesBackend, GpuManager, MultiRenderer},
-            DebugFlags, ImportDma, ImportMemWl,
+            pixman::PixmanRenderer,
+            ImportAll, ImportMem, ImportMemWl, Renderer, Texture,
         },
         session::{
             libseat::{self, LibSeatSession},
@@ -67,27 +85,21 @@ use smithay::{
             timer::{TimeoutAction, Timer},
             EventLoop, RegistrationToken,
         },
-        drm::{
-            control::{connector, crtc, Device, ModeTypeFlags},
-            Device as _,
-        },
+        drm::control::{connector, crtc, Device, ModeTypeFlags},
         input::{DeviceCapability, Libinput},
         rustix::fs::OFlags,
-        wayland_protocols::wp::{
-            linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
-            presentation_time::server::wp_presentation_feedback,
-        },
+        wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::{backend::GlobalId, protocol::wl_surface, Display, DisplayHandle},
     },
     utils::{DeviceFd, IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
     wayland::{
         compositor,
-        dmabuf::{DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
+        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         drm_lease::{
             DrmLease, DrmLeaseBuilder, DrmLeaseHandler, DrmLeaseRequest, DrmLeaseState,
             LeaseRejected,
         },
-        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjHandler, DrmSyncobjState},
+        drm_syncobj::{DrmSyncobjHandler, DrmSyncobjState},
         presentation::Refresh,
     },
 };
@@ -100,14 +112,17 @@ use tracing::{debug, error, info, trace, warn};
 // - we might need some work-arounds, if one supports modifiers, but the other does not
 //
 // So lets just pick `ARGB2101010` (10-bit) or `ARGB8888` (8-bit) for now, they are widely supported.
+#[cfg(feature = "gpu")]
 const SUPPORTED_FORMATS: &[Fourcc] = &[
     Fourcc::Abgr2101010,
     Fourcc::Argb2101010,
     Fourcc::Abgr8888,
     Fourcc::Argb8888,
 ];
+#[cfg(feature = "gpu")]
 const SUPPORTED_FORMATS_8BIT_ONLY: &[Fourcc] = &[Fourcc::Abgr8888, Fourcc::Argb8888];
 
+#[cfg(feature = "gpu")]
 type UdevRenderer<'a> = MultiRenderer<
     'a,
     'a,
@@ -127,11 +142,16 @@ pub struct UdevData {
     dmabuf_state: Option<(DmabufState, DmabufGlobal)>,
     syncobj_state: Option<DrmSyncobjState>,
     primary_gpu: DrmNode,
+    #[cfg(feature = "gpu")]
     gpus: GpuManager<GbmGlesBackend<GlesRenderer, DrmDeviceFd>>,
+    /// Software rendering into dumb buffers, for every output: built without `gpu`, asked for
+    /// with `EDEX_RENDERER=pixman`, or GBM/EGL did not come up on the primary GPU.
+    pixman: Option<PixmanRenderer>,
     backends: HashMap<DrmNode, BackendData>,
     pointer_images: Vec<(xcursor::parser::Image, MemoryRenderBuffer)>,
     pointer_element: PointerElement,
     pointer_image: crate::cursor::Cursor,
+    #[cfg(feature = "gpu")]
     debug_flags: DebugFlags,
     keyboards: Vec<smithay::reexports::input::Device>,
     /// Every libinput device, for pointer settings.
@@ -143,20 +163,33 @@ pub struct UdevData {
 }
 
 impl UdevData {
+    #[cfg(feature = "gpu")]
     pub fn set_debug_flags(&mut self, flags: DebugFlags) {
         if self.debug_flags != flags {
             self.debug_flags = flags;
 
             for backend in self.backends.values_mut() {
                 for surface in backend.surfaces.values_mut() {
-                    surface.drm_output.set_debug_flags(flags);
+                    if let OutputDrm::Gpu(drm_output) = &mut surface.drm_output {
+                        drm_output.set_debug_flags(flags);
+                    }
                 }
             }
         }
     }
 
+    #[cfg(feature = "gpu")]
     pub fn debug_flags(&self) -> DebugFlags {
         self.debug_flags
+    }
+
+    /// The renderer in use, for logs.
+    pub fn renderer_name(&self) -> &'static str {
+        if self.pixman.is_some() {
+            "pixman"
+        } else {
+            "GLES"
+        }
     }
 }
 
@@ -171,6 +204,7 @@ impl DmabufHandler for EdexState<UdevData> {
         dmabuf: Dmabuf,
         notifier: ImportNotifier,
     ) {
+        #[cfg(feature = "gpu")]
         if self
             .backend_data
             .gpus
@@ -180,9 +214,11 @@ impl DmabufHandler for EdexState<UdevData> {
         {
             dmabuf.set_node(self.backend_data.primary_gpu);
             let _ = notifier.successful::<EdexState<UdevData>>();
-        } else {
-            notifier.failed();
+            return;
         }
+        // The linux-dmabuf global only exists with GPU rendering.
+        let _ = dmabuf;
+        notifier.failed();
     }
 }
 delegate_dmabuf!(EdexState<UdevData>);
@@ -206,9 +242,13 @@ impl Backend for UdevData {
     }
 
     fn early_import(&mut self, surface: &wl_surface::WlSurface) {
-        if let Err(err) = self.gpus.early_import(self.primary_gpu, surface) {
-            warn!("Early buffer import failed: {}", err);
+        #[cfg(feature = "gpu")]
+        if self.pixman.is_none() {
+            if let Err(err) = self.gpus.early_import(self.primary_gpu, surface) {
+                warn!("Early buffer import failed: {}", err);
+            }
         }
+        let _ = surface;
     }
 
     fn update_led_state(&mut self, led_state: LedState) {
@@ -293,8 +333,23 @@ pub fn run_udev(opts: InitOptions) {
     };
     info!("Using {} as primary gpu.", primary_gpu);
 
+    #[cfg(feature = "gpu")]
     let gpus =
         GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High)).unwrap();
+    // Software rendering when built without `gpu` or asked for; with `gpu` it is also the
+    // fallback when GBM/EGL fail on the primary GPU (see `device_added`).
+    let pixman =
+        if cfg!(feature = "gpu") && std::env::var("EDEX_RENDERER").as_deref() != Ok("pixman") {
+            None
+        } else {
+            match PixmanRenderer::new() {
+                Ok(renderer) => Some(renderer),
+                Err(err) => {
+                    error!("Could not create the pixman renderer: {err}");
+                    return;
+                }
+            }
+        };
 
     let data = UdevData {
         dh: display_handle.clone(),
@@ -302,11 +357,14 @@ pub fn run_udev(opts: InitOptions) {
         syncobj_state: None,
         session,
         primary_gpu,
+        #[cfg(feature = "gpu")]
         gpus,
+        pixman,
         backends: HashMap::new(),
         pointer_image: crate::cursor::Cursor::load(),
         pointer_images: Vec::new(),
         pointer_element: PointerElement::default(),
+        #[cfg(feature = "gpu")]
         debug_flags: DebugFlags::empty(),
         keyboards: Vec::new(),
         input_devices: Vec::new(),
@@ -376,7 +434,7 @@ pub fn run_udev(opts: InitOptions) {
                 info!("pausing session");
 
                 for backend in data.backend_data.backends.values_mut() {
-                    backend.drm_output_manager.pause();
+                    backend.drm.pause();
                     backend.active_leases.clear();
                     if let Some(lease_global) = backend.leasing_global.as_mut() {
                         lease_global.suspend();
@@ -395,16 +453,7 @@ pub fn run_udev(opts: InitOptions) {
                     .iter_mut()
                     .map(|(handle, backend)| (*handle, backend))
                 {
-                    // if we do not care about flicking (caused by modesetting) we could just
-                    // pass true for disable connectors here. this would make sure our drm
-                    // device is in a known state (all connectors and planes disabled).
-                    // but for demonstration we choose a more optimistic path by leaving the
-                    // state as is and assume it will just work. If this assumption fails
-                    // we will try to reset the state when trying to queue a frame.
-                    backend
-                        .drm_output_manager
-                        .activate(false)
-                        .expect("failed to activate drm backend");
+                    backend.activate();
                     if let Some(lease_global) = backend.leasing_global.as_mut() {
                         lease_global.resume::<EdexState<UdevData>>();
                     }
@@ -447,81 +496,30 @@ pub fn run_udev(opts: InitOptions) {
             error!("Skipping device {device_id}: {err}");
         }
     }
-    state.shm_state.update_formats(
-        state
+    let shm_formats = match state.backend_data.pixman.as_ref() {
+        Some(renderer) => renderer.shm_formats().collect::<Vec<_>>(),
+        #[cfg(feature = "gpu")]
+        None => state
             .backend_data
             .gpus
             .single_renderer(&primary_gpu)
             .unwrap()
-            .shm_formats(),
+            .shm_formats()
+            .collect(),
+        #[cfg(not(feature = "gpu"))]
+        None => unreachable!("built without GPU rendering"),
+    };
+    state.shm_state.update_formats(shm_formats);
+    info!(
+        renderer = state.backend_data.renderer_name(),
+        "rendering with {}",
+        state.backend_data.renderer_name()
     );
 
-    let mut renderer = state
-        .backend_data
-        .gpus
-        .single_renderer(&primary_gpu)
-        .unwrap();
-
-    {
-        info!(
-            ?primary_gpu,
-            "Trying to initialize EGL Hardware Acceleration",
-        );
-        match renderer.bind_wl_display(&display_handle) {
-            Ok(_) => info!("EGL hardware-acceleration enabled"),
-            Err(err) => info!(?err, "Failed to initialize EGL hardware-acceleration"),
-        }
-    }
-
-    // init dmabuf support with format list from our primary gpu
-    let dmabuf_formats = renderer.dmabuf_formats();
-    let default_feedback = DmabufFeedbackBuilder::new(primary_gpu.dev_id(), dmabuf_formats)
-        .build()
-        .unwrap();
-    let mut dmabuf_state = DmabufState::new();
-    let global = dmabuf_state.create_global_with_default_feedback::<EdexState<UdevData>>(
-        &display_handle,
-        &default_feedback,
-    );
-    state.backend_data.dmabuf_state = Some((dmabuf_state, global));
-
-    let gpus = &mut state.backend_data.gpus;
-    state
-        .backend_data
-        .backends
-        .iter_mut()
-        .for_each(|(node, backend_data)| {
-            // Update the per drm surface dmabuf feedback
-            backend_data.surfaces.values_mut().for_each(|surface_data| {
-                surface_data.dmabuf_feedback = surface_data.dmabuf_feedback.take().or_else(|| {
-                    surface_data.drm_output.with_compositor(|compositor| {
-                        get_surface_dmabuf_feedback(
-                            primary_gpu,
-                            surface_data.render_node,
-                            *node,
-                            gpus,
-                            compositor.surface(),
-                        )
-                    })
-                });
-            });
-        });
-
-    // Expose syncobj protocol if supported by primary GPU
-    if let Some(primary_node) = state
-        .backend_data
-        .primary_gpu
-        .node_with_type(NodeType::Primary)
-        .and_then(|x| x.ok())
-    {
-        if let Some(backend) = state.backend_data.backends.get(&primary_node) {
-            let import_device = backend.drm_output_manager.device().device_fd().clone();
-            if supports_syncobj_eventfd(&import_device) {
-                let syncobj_state =
-                    DrmSyncobjState::new::<EdexState<UdevData>>(&display_handle, import_device);
-                state.backend_data.syncobj_state = Some(syncobj_state);
-            }
-        }
+    // linux-dmabuf, wl_drm and explicit sync need the GPU renderer; pixman takes shm only.
+    #[cfg(feature = "gpu")]
+    if state.backend_data.pixman.is_none() {
+        init_gpu_globals(&mut state, &display_handle, primary_gpu);
     }
 
     event_loop
@@ -573,6 +571,84 @@ pub fn run_udev(opts: InitOptions) {
     }
 }
 
+/// wl_drm (EGL), linux-dmabuf with per-surface feedback, and explicit sync when the primary GPU
+/// supports it.
+#[cfg(feature = "gpu")]
+fn init_gpu_globals(
+    state: &mut EdexState<UdevData>,
+    display_handle: &DisplayHandle,
+    primary_gpu: DrmNode,
+) {
+    let mut renderer = state
+        .backend_data
+        .gpus
+        .single_renderer(&primary_gpu)
+        .unwrap();
+
+    info!(
+        ?primary_gpu,
+        "Trying to initialize EGL Hardware Acceleration",
+    );
+    match renderer.bind_wl_display(display_handle) {
+        Ok(_) => info!("EGL hardware-acceleration enabled"),
+        Err(err) => info!(?err, "Failed to initialize EGL hardware-acceleration"),
+    }
+
+    // init dmabuf support with format list from our primary gpu
+    let dmabuf_formats = renderer.dmabuf_formats();
+    let default_feedback = DmabufFeedbackBuilder::new(primary_gpu.dev_id(), dmabuf_formats)
+        .build()
+        .unwrap();
+    let mut dmabuf_state = DmabufState::new();
+    let global = dmabuf_state.create_global_with_default_feedback::<EdexState<UdevData>>(
+        display_handle,
+        &default_feedback,
+    );
+    state.backend_data.dmabuf_state = Some((dmabuf_state, global));
+
+    let gpus = &mut state.backend_data.gpus;
+    state
+        .backend_data
+        .backends
+        .iter_mut()
+        .for_each(|(node, backend_data)| {
+            // Update the per drm surface dmabuf feedback
+            backend_data.surfaces.values_mut().for_each(|surface_data| {
+                let OutputDrm::Gpu(drm_output) = &mut surface_data.drm_output else {
+                    return;
+                };
+                surface_data.dmabuf_feedback = surface_data.dmabuf_feedback.take().or_else(|| {
+                    drm_output.with_compositor(|compositor| {
+                        get_surface_dmabuf_feedback(
+                            primary_gpu,
+                            surface_data.render_node,
+                            *node,
+                            gpus,
+                            compositor.surface(),
+                        )
+                    })
+                });
+            });
+        });
+
+    // Expose syncobj protocol if supported by primary GPU
+    if let Some(primary_node) = state
+        .backend_data
+        .primary_gpu
+        .node_with_type(NodeType::Primary)
+        .and_then(|x| x.ok())
+    {
+        if let Some(backend) = state.backend_data.backends.get(&primary_node) {
+            let import_device = backend.drm.device().device_fd().clone();
+            if supports_syncobj_eventfd(&import_device) {
+                let syncobj_state =
+                    DrmSyncobjState::new::<EdexState<UdevData>>(display_handle, import_device);
+                state.backend_data.syncobj_state = Some(syncobj_state);
+            }
+        }
+    }
+}
+
 /// Tap-to-click, natural scrolling and pointer speed for a libinput device.
 fn configure_pointer_device(
     device: &mut smithay::reexports::input::Device,
@@ -611,7 +687,7 @@ impl DrmLeaseHandler for EdexState<UdevData> {
             .get(&node)
             .ok_or(LeaseRejected::default())?;
 
-        let drm_device = backend.drm_output_manager.device();
+        let drm_device = backend.drm.device();
         let mut builder = DrmLeaseBuilder::new(drm_device);
         for conn in request.connectors {
             if let Some((_, crtc)) = backend
@@ -671,15 +747,95 @@ impl DrmSyncobjHandler for EdexState<UdevData> {
 }
 smithay::delegate_drm_syncobj!(EdexState<UdevData>);
 
-pub type RenderSurface =
-    GbmBufferedSurface<GbmAllocator<DrmDeviceFd>, Option<OutputPresentationFeedback>>;
-
-pub type GbmDrmCompositor = DrmCompositor<
+#[cfg(feature = "gpu")]
+type GbmDrmOutputManager = DrmOutputManager<
     GbmAllocator<DrmDeviceFd>,
-    GbmDevice<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
     Option<OutputPresentationFeedback>,
     DrmDeviceFd,
 >;
+
+#[cfg(feature = "gpu")]
+type GbmDrmOutput = DrmOutput<
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    Option<OutputPresentationFeedback>,
+    DrmDeviceFd,
+>;
+
+/// How a CRTC is driven: Smithay's `DrmOutput` (GBM buffers, GLES, plane scan-out) or a
+/// pixman-rendered dumb-buffer swapchain. One per output: the size difference does not matter.
+#[allow(clippy::large_enum_variant)]
+enum OutputDrm {
+    #[cfg(feature = "gpu")]
+    Gpu(GbmDrmOutput),
+    Pixman(DumbOutput<Option<OutputPresentationFeedback>>),
+}
+
+impl OutputDrm {
+    fn reset_buffers(&mut self) {
+        match self {
+            #[cfg(feature = "gpu")]
+            OutputDrm::Gpu(o) => o.reset_buffers(),
+            OutputDrm::Pixman(o) => o.reset_buffers(),
+        }
+    }
+
+    /// The queued frame reached the screen; returns its presentation feedback.
+    fn frame_submitted(
+        &mut self,
+    ) -> Result<Option<Option<OutputPresentationFeedback>>, SwapBuffersError> {
+        match self {
+            #[cfg(feature = "gpu")]
+            OutputDrm::Gpu(o) => o.frame_submitted().map_err(Into::<SwapBuffersError>::into),
+            OutputDrm::Pixman(o) => Ok(o.frame_submitted()),
+        }
+    }
+
+    /// DPMS off: disable the CRTC until the next frame.
+    fn clear(&mut self) -> Result<(), DrmError> {
+        match self {
+            #[cfg(feature = "gpu")]
+            OutputDrm::Gpu(o) => o.with_compositor(|c| c.clear()),
+            OutputDrm::Pixman(o) => o.clear(),
+        }
+    }
+}
+
+/// A DRM device: its outputs share either Smithay's output manager (GPU) or the bare device
+/// (pixman).
+#[allow(clippy::large_enum_variant)]
+enum DeviceDrm {
+    #[cfg(feature = "gpu")]
+    Gpu(GbmDrmOutputManager),
+    Pixman(DrmDevice),
+}
+
+impl DeviceDrm {
+    fn device(&self) -> &DrmDevice {
+        match self {
+            #[cfg(feature = "gpu")]
+            DeviceDrm::Gpu(m) => m.device(),
+            DeviceDrm::Pixman(d) => d,
+        }
+    }
+
+    fn device_mut(&mut self) -> &mut DrmDevice {
+        match self {
+            #[cfg(feature = "gpu")]
+            DeviceDrm::Gpu(m) => m.device_mut(),
+            DeviceDrm::Pixman(d) => d,
+        }
+    }
+
+    fn pause(&mut self) {
+        match self {
+            #[cfg(feature = "gpu")]
+            DeviceDrm::Gpu(m) => m.pause(),
+            DeviceDrm::Pixman(d) => d.pause(),
+        }
+    }
+}
 
 struct SurfaceData {
     dh: DisplayHandle,
@@ -687,12 +843,8 @@ struct SurfaceData {
     render_node: Option<DrmNode>,
     global: Option<GlobalId>,
     connector: connector::Info,
-    drm_output: DrmOutput<
-        GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
-        Option<OutputPresentationFeedback>,
-        DrmDeviceFd,
-    >,
+    drm_output: OutputDrm,
+    #[cfg(feature = "gpu")]
     disable_direct_scanout: bool,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
     last_presentation_time: Option<Time<Monotonic>>,
@@ -712,15 +864,36 @@ struct BackendData {
     non_desktop_connectors: Vec<(connector::Handle, crtc::Handle)>,
     leasing_global: Option<DrmLeaseState>,
     active_leases: Vec<DrmLease>,
-    drm_output_manager: DrmOutputManager<
-        GbmAllocator<DrmDeviceFd>,
-        GbmFramebufferExporter<DrmDeviceFd>,
-        Option<OutputPresentationFeedback>,
-        DrmDeviceFd,
-    >,
+    drm: DeviceDrm,
     drm_scanner: DrmScanner,
     render_node: Option<DrmNode>,
     registration_token: RegistrationToken,
+}
+
+impl BackendData {
+    /// The session is active again (VT switch back): re-read the CRTC state.
+    fn activate(&mut self) {
+        // if we do not care about flicking (caused by modesetting) we could just pass true for
+        // disable connectors here. this would make sure our drm device is in a known state (all
+        // connectors and planes disabled). but we choose a more optimistic path by leaving the
+        // state as is and assume it will just work. If this assumption fails we will try to
+        // reset the state when trying to queue a frame.
+        match &mut self.drm {
+            #[cfg(feature = "gpu")]
+            DeviceDrm::Gpu(m) => m.activate(false).expect("failed to activate drm backend"),
+            DeviceDrm::Pixman(d) => {
+                d.activate(false).expect("failed to activate drm backend");
+                for surface in self.surfaces.values_mut() {
+                    #[allow(irrefutable_let_patterns)]
+                    if let OutputDrm::Pixman(o) = &mut surface.drm_output {
+                        if let Err(err) = o.reset_state() {
+                            warn!("resetting the CRTC state: {err}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -729,18 +902,23 @@ enum DeviceAddError {
     DeviceOpen(libseat::Error),
     #[error("Failed to initialize drm device: {0}")]
     DrmDevice(DrmError),
+    #[cfg(feature = "gpu")]
     #[error("Failed to initialize gbm device: {0}")]
     GbmDevice(std::io::Error),
     #[error("Failed to access drm node: {0}")]
     DrmNode(CreateDrmNodeError),
+    #[cfg(feature = "gpu")]
     #[error("Failed to add device to GpuManager: {0}")]
     AddNode(egl::Error),
-    #[error("The device has no render node")]
-    NoRenderNode,
+    #[cfg(feature = "gpu")]
     #[error("Primary GPU is missing")]
     PrimaryGpuMissing,
+    #[cfg(feature = "gpu")]
+    #[error("Could not create the pixman renderer: {0}")]
+    Pixman(smithay::backend::renderer::pixman::PixmanError),
 }
 
+#[cfg(feature = "gpu")]
 fn get_surface_dmabuf_feedback(
     primary_gpu: DrmNode,
     render_node: Option<DrmNode>,
@@ -820,7 +998,17 @@ impl EdexState<UdevData> {
 
         let (drm, notifier) =
             DrmDevice::new(fd.clone(), true).map_err(DeviceAddError::DrmDevice)?;
-        let gbm = GbmDevice::new(fd).map_err(DeviceAddError::GbmDevice)?;
+
+        #[cfg(feature = "gpu")]
+        let (drm, render_node) = match self.gpu_device(node, &fd, drm)? {
+            Ok(gpu) => gpu,
+            Err(drm) => (DeviceDrm::Pixman(drm), None),
+        };
+        #[cfg(not(feature = "gpu"))]
+        let (drm, render_node) = (DeviceDrm::Pixman(drm), None);
+        if matches!(drm, DeviceDrm::Pixman(_)) {
+            info!("{node}: software rendering (pixman, dumb buffers)");
+        }
 
         let registration_token = self
             .handle
@@ -837,15 +1025,63 @@ impl EdexState<UdevData> {
             )
             .unwrap();
 
+        self.backend_data.backends.insert(
+            node,
+            BackendData {
+                registration_token,
+                drm,
+                drm_scanner: DrmScanner::new(),
+                non_desktop_connectors: Vec::new(),
+                render_node,
+                surfaces: HashMap::new(),
+                leasing_global: DrmLeaseState::new::<EdexState<UdevData>>(
+                    &self.display_handle,
+                    &node,
+                )
+                .inspect_err(|err| {
+                    warn!(?err, "Failed to initialize drm lease global for: {}", node);
+                })
+                .ok(),
+                active_leases: Vec::new(),
+            },
+        );
+
+        self.device_changed(node);
+
+        Ok(())
+    }
+
+    /// Set a device up for GBM/EGL rendering. `Ok(Err(drm))` hands the device back for pixman:
+    /// software rendering is on, or GBM/EGL do not work on the first device (no libEGL, no
+    /// driver), which switches every output to pixman.
+    #[cfg(feature = "gpu")]
+    fn gpu_device(
+        &mut self,
+        node: DrmNode,
+        fd: &DrmDeviceFd,
+        drm: DrmDevice,
+    ) -> Result<Result<(DeviceDrm, Option<DrmNode>), DrmDevice>, DeviceAddError> {
+        if self.backend_data.pixman.is_some() {
+            return Ok(Err(drm));
+        }
+        let gbm = match GbmDevice::new(fd.clone()) {
+            Ok(gbm) => gbm,
+            Err(err) if self.backend_data.backends.is_empty() => {
+                warn!(?err, "no GBM device: falling back to pixman");
+                self.backend_data.pixman =
+                    Some(PixmanRenderer::new().map_err(DeviceAddError::Pixman)?);
+                return Ok(Err(drm));
+            }
+            Err(err) => return Err(DeviceAddError::GbmDevice(err)),
+        };
+
         let mut try_initialize_gpu = || {
             let display = unsafe { EGLDisplay::new(gbm.clone()).map_err(DeviceAddError::AddNode)? };
             let egl_device =
                 EGLDevice::device_for_display(&display).map_err(DeviceAddError::AddNode)?;
 
-            if egl_device.is_software() {
-                return Err(DeviceAddError::NoRenderNode);
-            }
-
+            // A software EGL device (Mesa's llvmpipe/softpipe through kms_swrast) is fine:
+            // it renders into GBM buffers like a GPU.
             let render_node = egl_device
                 .try_get_render_node()
                 .ok()
@@ -866,6 +1102,12 @@ impl EdexState<UdevData> {
             })
             .ok();
 
+        if render_node.is_none() && self.backend_data.backends.is_empty() {
+            warn!("GBM/EGL rendering is unavailable on {node}: falling back to pixman");
+            self.backend_data.pixman = Some(PixmanRenderer::new().map_err(DeviceAddError::Pixman)?);
+            return Ok(Err(drm));
+        }
+
         let allocator = render_node
             .is_some()
             .then(|| {
@@ -883,7 +1125,10 @@ impl EdexState<UdevData> {
                             backend.render_node == Some(self.backend_data.primary_gpu)
                         })
                     })
-                    .map(|backend| backend.drm_output_manager.allocator().clone())
+                    .and_then(|backend| match &backend.drm {
+                        DeviceDrm::Gpu(m) => Some(m.allocator().clone()),
+                        DeviceDrm::Pixman(_) => None,
+                    })
             })
             .ok_or(DeviceAddError::PrimaryGpuMissing)?;
 
@@ -916,31 +1161,7 @@ impl EdexState<UdevData> {
             color_formats.iter().copied(),
             render_formats,
         );
-
-        self.backend_data.backends.insert(
-            node,
-            BackendData {
-                registration_token,
-                drm_output_manager,
-                drm_scanner: DrmScanner::new(),
-                non_desktop_connectors: Vec::new(),
-                render_node,
-                surfaces: HashMap::new(),
-                leasing_global: DrmLeaseState::new::<EdexState<UdevData>>(
-                    &self.display_handle,
-                    &node,
-                )
-                .inspect_err(|err| {
-                    warn!(?err, "Failed to initialize drm lease global for: {}", node);
-                })
-                .ok(),
-                active_leases: Vec::new(),
-            },
-        );
-
-        self.device_changed(node);
-
-        Ok(())
+        Ok(Ok((DeviceDrm::Gpu(drm_output_manager), render_node)))
     }
 
     fn connector_connected(
@@ -949,18 +1170,12 @@ impl EdexState<UdevData> {
         connector: connector::Info,
         crtc: crtc::Handle,
     ) {
+        let renderer_name = self.backend_data.renderer_name();
         let device = if let Some(device) = self.backend_data.backends.get_mut(&node) {
             device
         } else {
             return;
         };
-
-        let render_node = device.render_node.unwrap_or(self.backend_data.primary_gpu);
-        let mut renderer = self
-            .backend_data
-            .gpus
-            .single_renderer(&render_node)
-            .unwrap();
 
         let output_name = format!(
             "{}-{}",
@@ -969,7 +1184,7 @@ impl EdexState<UdevData> {
         );
         info!(?crtc, "Trying to setup connector {}", output_name,);
 
-        let drm_device = device.drm_output_manager.device();
+        let drm_device = device.drm.device();
 
         let non_desktop = drm_device
             .get_properties(connector.handle())
@@ -1070,68 +1285,59 @@ impl EdexState<UdevData> {
                 device_id: node,
             });
 
-            let driver = match drm_device.get_driver() {
-                Ok(driver) => driver,
-                Err(err) => {
-                    warn!("Failed to query drm driver: {}", err);
-                    return;
+            let (w, h) = drm_mode.size();
+            let drm_output = match &mut device.drm {
+                #[cfg(feature = "gpu")]
+                DeviceDrm::Gpu(manager) => {
+                    let render_node = device.render_node.unwrap_or(self.backend_data.primary_gpu);
+                    let mut renderer = self
+                        .backend_data
+                        .gpus
+                        .single_renderer(&render_node)
+                        .unwrap();
+                    init_gpu_output(manager, crtc, drm_mode, &connector, &output, &mut renderer)
+                        .map(OutputDrm::Gpu)
                 }
+                DeviceDrm::Pixman(drm) => drm
+                    .create_surface(crtc, drm_mode, &[connector.handle()])
+                    .map(|surface| {
+                        OutputDrm::Pixman(DumbOutput::new(
+                            surface,
+                            drm.device_fd().clone(),
+                            &output,
+                        ))
+                    })
+                    .map_err(|e| e.to_string()),
             };
-
-            let mut planes = match drm_device.planes(&crtc) {
-                Ok(planes) => planes,
-                Err(err) => {
-                    warn!("Failed to query crtc planes: {}", err);
-                    return;
-                }
-            };
-
-            // Using an overlay plane on a nvidia card breaks
-            if driver
-                .name()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains("nvidia")
-                || driver
-                    .description()
-                    .to_string_lossy()
-                    .to_lowercase()
-                    .contains("nvidia")
-            {
-                planes.overlay = vec![];
-            }
-
-            let drm_output = match device
-                .drm_output_manager
-                .initialize_output::<_, OutputRenderElements<UdevRenderer<'_>, WindowRenderElement<UdevRenderer<'_>>>>(
-                    crtc,
-                    drm_mode,
-                    &[connector.handle()],
-                    &output,
-                    Some(planes),
-                    &mut renderer,
-                    &DrmOutputRenderElements::default(),
-                ) {
+            let mut drm_output = match drm_output {
                 Ok(drm_output) => drm_output,
                 Err(err) => {
                     warn!("Failed to initialize drm output: {}", err);
+                    self.space.unmap_output(&output);
+                    self.display_handle
+                        .remove_global::<EdexState<UdevData>>(global);
                     return;
                 }
             };
 
+            #[cfg(feature = "gpu")]
             let disable_direct_scanout = std::env::var("ANVIL_DISABLE_DIRECT_SCANOUT").is_ok();
 
-            let dmabuf_feedback = drm_output.with_compositor(|compositor| {
-                compositor.set_debug_flags(self.backend_data.debug_flags);
+            let dmabuf_feedback = match &mut drm_output {
+                #[cfg(feature = "gpu")]
+                OutputDrm::Gpu(drm_output) => drm_output.with_compositor(|compositor| {
+                    compositor.set_debug_flags(self.backend_data.debug_flags);
 
-                get_surface_dmabuf_feedback(
-                    self.backend_data.primary_gpu,
-                    device.render_node,
-                    node,
-                    &mut self.backend_data.gpus,
-                    compositor.surface(),
-                )
-            });
+                    get_surface_dmabuf_feedback(
+                        self.backend_data.primary_gpu,
+                        device.render_node,
+                        node,
+                        &mut self.backend_data.gpus,
+                        compositor.surface(),
+                    )
+                }),
+                OutputDrm::Pixman(_) => None,
+            };
 
             let surface = SurfaceData {
                 dh: self.display_handle.clone(),
@@ -1140,12 +1346,20 @@ impl EdexState<UdevData> {
                 global: Some(global),
                 connector: connector.clone(),
                 drm_output,
+                #[cfg(feature = "gpu")]
                 disable_direct_scanout,
                 dmabuf_feedback,
                 last_presentation_time: None,
                 vblank_throttle_timer: None,
             };
 
+            info!(
+                "output {} enabled {}x{} ({})",
+                output.name(),
+                w,
+                h,
+                renderer_name
+            );
             device.surfaces.insert(crtc, surface);
             self.wm_output_added(&output);
             if let Some(kelvin) = self.backend_data.gamma {
@@ -1153,7 +1367,7 @@ impl EdexState<UdevData> {
                     self.backend_data
                         .backends
                         .get(&node)
-                        .map(|b| b.drm_output_manager.device()),
+                        .map(|b| b.drm.device()),
                     crtc,
                     Some(kelvin),
                 );
@@ -1208,21 +1422,24 @@ impl EdexState<UdevData> {
             }
         }
 
-        let render_node = device.render_node.unwrap_or(self.backend_data.primary_gpu);
-        let mut renderer = self
-            .backend_data
-            .gpus
-            .single_renderer(&render_node)
-            .unwrap();
-        let _ = device.drm_output_manager.try_to_restore_modifiers::<_, OutputRenderElements<
-            UdevRenderer<'_>,
-            WindowRenderElement<UdevRenderer<'_>>,
-        >>(
-            &mut renderer,
-            // FIXME: For a flicker free operation we should return the actual elements for this output..
-            // Instead we just use black to "simulate" a modeset :)
-            &DrmOutputRenderElements::default(),
-        );
+        #[cfg(feature = "gpu")]
+        if let DeviceDrm::Gpu(manager) = &mut device.drm {
+            let render_node = device.render_node.unwrap_or(self.backend_data.primary_gpu);
+            let mut renderer = self
+                .backend_data
+                .gpus
+                .single_renderer(&render_node)
+                .unwrap();
+            let _ = manager.try_to_restore_modifiers::<_, OutputRenderElements<
+                UdevRenderer<'_>,
+                WindowRenderElement<UdevRenderer<'_>>,
+            >>(
+                &mut renderer,
+                // FIXME: For a flicker free operation we should return the actual elements for this output..
+                // Instead we just use black to "simulate" a modeset :)
+                &DrmOutputRenderElements::default(),
+            );
+        }
     }
 
     fn device_changed(&mut self, node: DrmNode) {
@@ -1232,10 +1449,7 @@ impl EdexState<UdevData> {
             return;
         };
 
-        let scan_result = match device
-            .drm_scanner
-            .scan_connectors(device.drm_output_manager.device())
-        {
+        let scan_result = match device.drm_scanner.scan_connectors(device.drm.device()) {
             Ok(scan_result) => scan_result,
             Err(err) => {
                 tracing::warn!(?err, "Failed to scan connectors");
@@ -1290,6 +1504,7 @@ impl EdexState<UdevData> {
                 leasing_global.disable_global::<EdexState<UdevData>>();
             }
 
+            #[cfg(feature = "gpu")]
             if let Some(render_node) = backend_data.render_node {
                 self.backend_data.gpus.as_mut().remove_node(&render_node);
             }
@@ -1404,10 +1619,7 @@ impl EdexState<UdevData> {
         }
         surface.last_presentation_time = Some(clock);
 
-        let submit_result = surface
-            .drm_output
-            .frame_submitted()
-            .map_err(Into::<SwapBuffersError>::into);
+        let submit_result = surface.drm_output.frame_submitted();
 
         let schedule_render = match submit_result {
             Ok(user_data) => {
@@ -1573,18 +1785,6 @@ impl EdexState<UdevData> {
             .pointer_image
             .get_image(1 /*scale*/, self.clock.now().into());
 
-        let primary_gpu = self.backend_data.primary_gpu;
-        let render_node = surface.render_node.unwrap_or(primary_gpu);
-        let mut renderer = if primary_gpu == render_node {
-            self.backend_data.gpus.single_renderer(&render_node)
-        } else {
-            let format = surface.drm_output.format();
-            self.backend_data
-                .gpus
-                .renderer(&primary_gpu, &render_node, format)
-        }
-        .unwrap();
-
         let pointer_images = &mut self.backend_data.pointer_images;
         let pointer_image = pointer_images
             .iter()
@@ -1608,19 +1808,51 @@ impl EdexState<UdevData> {
                 buffer
             });
 
-        let result = render_surface(
-            surface,
-            &mut renderer,
-            &self.space,
-            &output,
-            self.pointer.current_location(),
-            &pointer_image,
-            &mut self.backend_data.pointer_element,
-            &self.dnd_icon,
-            &mut self.cursor_status,
-            self.show_window_preview,
-            screen,
-        );
+        let mut cursor = CursorState {
+            space: &self.space,
+            output: &output,
+            pointer_location: self.pointer.current_location(),
+            pointer_image: &pointer_image,
+            pointer_element: &mut self.backend_data.pointer_element,
+            dnd_icon: &self.dnd_icon,
+            cursor_status: &mut self.cursor_status,
+        };
+        let result = match &mut surface.drm_output {
+            #[cfg(feature = "gpu")]
+            OutputDrm::Gpu(drm_output) => {
+                let primary_gpu = self.backend_data.primary_gpu;
+                let render_node = surface.render_node.unwrap_or(primary_gpu);
+                let mut renderer = if primary_gpu == render_node {
+                    self.backend_data.gpus.single_renderer(&render_node)
+                } else {
+                    let format = drm_output.format();
+                    self.backend_data
+                        .gpus
+                        .renderer(&primary_gpu, &render_node, format)
+                }
+                .unwrap();
+                render_gpu(
+                    drm_output,
+                    surface.disable_direct_scanout,
+                    &mut renderer,
+                    &mut cursor,
+                    self.show_window_preview,
+                    screen,
+                )
+            }
+            OutputDrm::Pixman(dumb) => match self.backend_data.pixman.as_mut() {
+                Some(renderer) => render_pixman(
+                    dumb,
+                    renderer,
+                    &mut cursor,
+                    self.show_window_preview,
+                    screen,
+                ),
+                None => Err(SwapBuffersError::ContextLost(
+                    "no pixman renderer for a software output".into(),
+                )),
+            },
+        };
         let reschedule = match result {
             Ok((has_rendered, states)) => {
                 let dmabuf_feedback = surface.dmabuf_feedback.clone();
@@ -1645,7 +1877,7 @@ impl EdexState<UdevData> {
                             // most likely we hit this after a tty switch when a foreign master changed CRTC <-> connector bindings
                             // and we run in a mismatch
                             device
-                                .drm_output_manager
+                                .drm
                                 .device_mut()
                                 .reset_state()
                                 .expect("failed to reset drm device");
@@ -1689,27 +1921,33 @@ impl EdexState<UdevData> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_surface<'a>(
-    surface: &'a mut SurfaceData,
-    renderer: &mut UdevRenderer<'a>,
-    space: &Space<WindowElement>,
-    output: &Output,
+/// What the cursor and drag-and-drop icon are drawn from.
+struct CursorState<'a> {
+    space: &'a Space<WindowElement>,
+    output: &'a Output,
     pointer_location: Point<f64, Logical>,
-    pointer_image: &MemoryRenderBuffer,
-    pointer_element: &mut PointerElement,
-    dnd_icon: &Option<DndIcon>,
-    cursor_status: &mut CursorImageStatus,
-    show_window_preview: bool,
-    screen: Screen<'_>,
-) -> Result<(bool, RenderElementStates), SwapBuffersError> {
-    let output_geometry = space.output_geometry(output).unwrap();
-    let scale = Scale::from(output.current_scale().fractional_scale());
+    pointer_image: &'a MemoryRenderBuffer,
+    pointer_element: &'a mut PointerElement,
+    dnd_icon: &'a Option<DndIcon>,
+    cursor_status: &'a mut CursorImageStatus,
+}
 
-    let mut custom_elements: Vec<CustomRenderElements<_>> = Vec::new();
+/// The cursor and the drag-and-drop icon, when the pointer is on this output.
+fn cursor_elements<R>(
+    renderer: &mut R,
+    cursor: &mut CursorState<'_>,
+) -> Vec<CustomRenderElements<R>>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Clone + Send + 'static,
+{
+    let output_geometry = cursor.space.output_geometry(cursor.output).unwrap();
+    let scale = Scale::from(cursor.output.current_scale().fractional_scale());
 
-    if output_geometry.to_f64().contains(pointer_location) {
-        let cursor_hotspot = if let CursorImageStatus::Surface(ref surface) = cursor_status {
+    let mut custom_elements: Vec<CustomRenderElements<R>> = Vec::new();
+
+    if output_geometry.to_f64().contains(cursor.pointer_location) {
+        let cursor_hotspot = if let CursorImageStatus::Surface(ref surface) = cursor.cursor_status {
             compositor::with_states(surface, |states| {
                 states
                     .data_map
@@ -1722,27 +1960,31 @@ fn render_surface<'a>(
         } else {
             (0, 0).into()
         };
-        let cursor_pos = pointer_location - output_geometry.loc.to_f64();
+        let cursor_pos = cursor.pointer_location - output_geometry.loc.to_f64();
 
         // set cursor
-        pointer_element.set_buffer(pointer_image.clone());
+        cursor
+            .pointer_element
+            .set_buffer(cursor.pointer_image.clone());
 
         // draw the cursor as relevant
         {
             // reset the cursor if the surface is no longer alive
             let mut reset = false;
-            if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+            if let CursorImageStatus::Surface(ref surface) = *cursor.cursor_status {
                 reset = !surface.alive();
             }
             if reset {
-                *cursor_status = CursorImageStatus::default_named();
+                *cursor.cursor_status = CursorImageStatus::default_named();
             }
 
-            pointer_element.set_status(cursor_status.clone());
+            cursor
+                .pointer_element
+                .set_status(cursor.cursor_status.clone());
         }
 
         custom_elements.extend(
-            pointer_element.render_elements(
+            cursor.pointer_element.render_elements(
                 renderer,
                 (cursor_pos - cursor_hotspot.to_f64())
                     .to_physical(scale)
@@ -1753,24 +1995,36 @@ fn render_surface<'a>(
         );
 
         // draw the dnd icon if applicable
-        {
-            if let Some(icon) = dnd_icon.as_ref() {
-                let dnd_icon_pos = (cursor_pos + icon.offset.to_f64())
-                    .to_physical(scale)
-                    .to_i32_round();
-                if icon.surface.alive() {
-                    custom_elements.extend(AsRenderElements::<UdevRenderer<'a>>::render_elements(
-                        &SurfaceTree::from_surface(&icon.surface),
-                        renderer,
-                        dnd_icon_pos,
-                        scale,
-                        1.0,
-                    ));
-                }
+        if let Some(icon) = cursor.dnd_icon.as_ref() {
+            let dnd_icon_pos = (cursor_pos + icon.offset.to_f64())
+                .to_physical(scale)
+                .to_i32_round();
+            if icon.surface.alive() {
+                custom_elements.extend(AsRenderElements::<R>::render_elements(
+                    &SurfaceTree::from_surface(&icon.surface),
+                    renderer,
+                    dnd_icon_pos,
+                    scale,
+                    1.0,
+                ));
             }
         }
     }
+    custom_elements
+}
 
+/// Compose and queue a frame through Smithay's `DrmOutput` (GLES).
+#[cfg(feature = "gpu")]
+fn render_gpu<'a>(
+    drm_output: &mut GbmDrmOutput,
+    disable_direct_scanout: bool,
+    renderer: &mut UdevRenderer<'a>,
+    cursor: &mut CursorState<'_>,
+    show_window_preview: bool,
+    screen: Screen<'_>,
+) -> Result<(bool, RenderElementStates), SwapBuffersError> {
+    let custom_elements = cursor_elements(renderer, cursor);
+    let (space, output) = (cursor.space, cursor.output);
     let (elements, clear_color) = output_elements(
         output,
         space,
@@ -1780,13 +2034,12 @@ fn render_surface<'a>(
         screen,
     );
 
-    let frame_mode = if surface.disable_direct_scanout {
+    let frame_mode = if disable_direct_scanout {
         FrameFlags::empty()
     } else {
         FrameFlags::DEFAULT
     };
-    let (rendered, states) = surface
-        .drm_output
+    let (rendered, states) = drm_output
         .render_frame(renderer, &elements, clear_color, frame_mode)
         .map(|render_frame_result| (!render_frame_result.is_empty, render_frame_result.states))
         .map_err(|err| match err {
@@ -1799,17 +2052,114 @@ fn render_surface<'a>(
             _ => unreachable!(),
         })?;
 
-    update_primary_scanout_output(space, output, dnd_icon, cursor_status, &states);
+    update_primary_scanout_output(
+        space,
+        output,
+        cursor.dnd_icon,
+        cursor.cursor_status,
+        &states,
+    );
 
     if rendered {
         let output_presentation_feedback = take_presentation_feedback(output, space, &states);
-        surface
-            .drm_output
+        drm_output
             .queue_frame(Some(output_presentation_feedback))
             .map_err(Into::<SwapBuffersError>::into)?;
     }
 
     Ok((rendered, states))
+}
+
+/// Compose a frame with pixman into a dumb buffer and flip to it.
+fn render_pixman(
+    dumb: &mut DumbOutput<Option<OutputPresentationFeedback>>,
+    renderer: &mut PixmanRenderer,
+    cursor: &mut CursorState<'_>,
+    show_window_preview: bool,
+    screen: Screen<'_>,
+) -> Result<(bool, RenderElementStates), SwapBuffersError> {
+    let custom_elements = cursor_elements(renderer, cursor);
+    let (space, output) = (cursor.space, cursor.output);
+    let (elements, clear_color) = output_elements(
+        output,
+        space,
+        custom_elements,
+        renderer,
+        show_window_preview,
+        screen,
+    );
+    let frame = dumb
+        .render_frame(renderer, &elements, clear_color)
+        .map_err(dumb_swap_error)?;
+
+    update_primary_scanout_output(
+        space,
+        output,
+        cursor.dnd_icon,
+        cursor.cursor_status,
+        &frame.states,
+    );
+
+    if frame.rendered {
+        let output_presentation_feedback = take_presentation_feedback(output, space, &frame.states);
+        dumb.queue_frame(Some(output_presentation_feedback))
+            .map_err(dumb_swap_error)?;
+    }
+
+    Ok((frame.rendered, frame.states))
+}
+
+fn dumb_swap_error(err: DumbError) -> SwapBuffersError {
+    match err {
+        DumbError::Drm(err) => err.into(),
+        err => SwapBuffersError::TemporaryFailure(Box::new(err)),
+    }
+}
+
+/// Smithay's `DrmOutput` for a CRTC: GBM swapchain, GLES composition, plane scan-out.
+#[cfg(feature = "gpu")]
+fn init_gpu_output(
+    manager: &mut GbmDrmOutputManager,
+    crtc: crtc::Handle,
+    drm_mode: smithay::reexports::drm::control::Mode,
+    connector: &connector::Info,
+    output: &Output,
+    renderer: &mut UdevRenderer<'_>,
+) -> Result<GbmDrmOutput, String> {
+    let drm_device = manager.device();
+    let driver = drm_device
+        .get_driver()
+        .map_err(|err| format!("Failed to query drm driver: {err}"))?;
+    let mut planes = drm_device
+        .planes(&crtc)
+        .map_err(|err| format!("Failed to query crtc planes: {err}"))?;
+
+    // Using an overlay plane on a nvidia card breaks
+    if driver
+        .name()
+        .to_string_lossy()
+        .to_lowercase()
+        .contains("nvidia")
+        || driver
+            .description()
+            .to_string_lossy()
+            .to_lowercase()
+            .contains("nvidia")
+    {
+        planes.overlay = vec![];
+    }
+
+    manager
+        .initialize_output::<_, OutputRenderElements<UdevRenderer<'_>, WindowRenderElement<UdevRenderer<'_>>>>(
+            crtc,
+            drm_mode,
+            &[connector.handle()],
+            output,
+            Some(planes),
+            renderer,
+            &DrmOutputRenderElements::default(),
+        )
+        .map_err(|err| err.to_string())
 }
 
 /// The connector mode a rule asks for: exact size (and refresh when given), else preferred.
@@ -1860,7 +2210,7 @@ impl EdexState<UdevData> {
         self.backend_data.gamma = kelvin;
         for backend in self.backend_data.backends.values() {
             for crtc in backend.surfaces.keys() {
-                set_crtc_gamma(Some(backend.drm_output_manager.device()), *crtc, kelvin);
+                set_crtc_gamma(Some(backend.drm.device()), *crtc, kelvin);
             }
         }
     }
@@ -1874,7 +2224,7 @@ impl EdexState<UdevData> {
         for (node, backend) in self.backend_data.backends.iter_mut() {
             for surface in backend.surfaces.values_mut() {
                 if !on {
-                    if let Err(e) = surface.drm_output.with_compositor(|c| c.clear()) {
+                    if let Err(e) = surface.drm_output.clear() {
                         warn!("turning the display off: {e}");
                     }
                 } else {
@@ -1938,30 +2288,9 @@ impl EdexState<UdevData> {
             if let Some(mode) = wanted {
                 let wl_mode = WlMode::from(mode);
                 if output.current_mode() != Some(wl_mode) {
-                    let render_node = self
-                        .backend_data
-                        .backends
-                        .get(&node)
-                        .and_then(|b| b.render_node)
-                        .unwrap_or(self.backend_data.primary_gpu);
-                    if let (Ok(mut renderer), Some(surface)) = (
-                        self.backend_data.gpus.single_renderer(&render_node),
-                        self.backend_data
-                            .backends
-                            .get_mut(&node)
-                            .and_then(|b| b.surfaces.get_mut(&crtc)),
-                    ) {
-                        match surface.drm_output.use_mode::<_, OutputRenderElements<
-                            UdevRenderer<'_>,
-                            WindowRenderElement<UdevRenderer<'_>>,
-                        >>(
-                            mode,
-                            &mut renderer,
-                            &DrmOutputRenderElements::default(),
-                        ) {
-                            Ok(()) => output.change_current_state(Some(wl_mode), None, None, None),
-                            Err(e) => warn!("mode change on {} failed: {e}", output.name()),
-                        }
+                    match self.udev_use_mode(node, crtc, mode) {
+                        Ok(()) => output.change_current_state(Some(wl_mode), None, None, None),
+                        Err(e) => warn!("mode change on {} failed: {e}", output.name()),
                     }
                 }
             }
@@ -1979,6 +2308,43 @@ impl EdexState<UdevData> {
             self.backend_data.reset_buffers(&output);
         }
         self.wm_outputs_changed();
+    }
+
+    /// Modeset a CRTC to `mode` (on its next frame).
+    fn udev_use_mode(
+        &mut self,
+        node: DrmNode,
+        crtc: crtc::Handle,
+        mode: smithay::reexports::drm::control::Mode,
+    ) -> Result<(), String> {
+        let Some(backend) = self.backend_data.backends.get_mut(&node) else {
+            return Err("no such device".into());
+        };
+        let render_node = backend.render_node;
+        let Some(surface) = backend.surfaces.get_mut(&crtc) else {
+            return Err("no such output".into());
+        };
+        match &mut surface.drm_output {
+            #[cfg(feature = "gpu")]
+            OutputDrm::Gpu(drm_output) => {
+                let render_node = render_node.unwrap_or(self.backend_data.primary_gpu);
+                let mut renderer = self
+                    .backend_data
+                    .gpus
+                    .single_renderer(&render_node)
+                    .map_err(|e| e.to_string())?;
+                drm_output
+                    .use_mode::<_, OutputRenderElements<
+                        UdevRenderer<'_>,
+                        WindowRenderElement<UdevRenderer<'_>>,
+                    >>(mode, &mut renderer, &DrmOutputRenderElements::default())
+                    .map_err(|e| e.to_string())
+            }
+            OutputDrm::Pixman(dumb) => {
+                let _ = render_node;
+                dumb.use_mode(mode).map_err(|e| e.to_string())
+            }
+        }
     }
 
     fn udev_screenshot(
@@ -2003,18 +2369,29 @@ impl EdexState<UdevData> {
         .ok_or_else(|| anyhow::anyhow!("no such output"))?;
         let background = self.config.background;
         let clear = Color32F::new(background[0], background[1], background[2], 1.0);
-        let primary = self.backend_data.primary_gpu;
-        let mut renderer = self
-            .backend_data
-            .gpus
-            .single_renderer(&primary)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let img = crate::screenshot::capture::<_, smithay::backend::renderer::gles::GlesTexture>(
-            &mut renderer,
-            &target,
-            &self.space,
-            clear,
-        )?;
+        let img = match self.backend_data.pixman.as_mut() {
+            Some(renderer) => crate::screenshot::capture::<
+                _,
+                smithay::reexports::pixman::Image<'static, 'static>,
+            >(renderer, &target, &self.space, clear)?,
+            #[cfg(feature = "gpu")]
+            None => {
+                let primary = self.backend_data.primary_gpu;
+                let mut renderer = self
+                    .backend_data
+                    .gpus
+                    .single_renderer(&primary)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                crate::screenshot::capture::<_, smithay::backend::renderer::gles::GlesTexture>(
+                    &mut renderer,
+                    &target,
+                    &self.space,
+                    clear,
+                )?
+            }
+            #[cfg(not(feature = "gpu"))]
+            None => anyhow::bail!("no renderer"),
+        };
         let img = match (region, self.space.output_geometry(&target)) {
             (Some(r), Some(geo)) => {
                 crate::screenshot::crop(img, geo, target.current_scale().fractional_scale(), r)?

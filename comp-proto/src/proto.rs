@@ -223,7 +223,7 @@ pub enum Request {
     },
 
     /// Greeter mode only: authenticate and, on success, start `session` (a name from
-    /// `/usr/share/wayland-sessions`, or `None` for the eDEX session) as `user`. Lock mode: unlock.
+    /// `/usr/local/share/wayland-sessions`, `/usr/share/wayland-sessions`, or `None` for the eDEX session) as `user`. Lock mode: unlock.
     Login {
         user: String,
         password: String,
