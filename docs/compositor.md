@@ -30,7 +30,7 @@ edex-comp screenshot [--output NAME] [--region "X,Y WxH"] FILE.png
 
 The pixman path (`src/dumb.rs`) renders each output with Smithay's `PixmanRenderer` and damage
 tracking into two DRM dumb buffers mapped into memory, and page-flips them on the CRTC's primary
-plane. It needs nothing but KMS, so it works on bochs, virtio-gpu (2D) and simpledrm. Clients get
+plane. It needs nothing but KMS dumb buffers, which simple drivers like bochs, virtio-gpu (2D) and simpledrm have. Clients get
 `wl_shm` only (no linux-dmabuf). `EDEX_RENDERER=pixman` forces it in a `gpu` build. The log says
 which renderer runs (`rendering with pixman`) and every enabled output
 (`output Virtual-1 enabled 1280x800 (pixman)`).

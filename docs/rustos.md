@@ -6,8 +6,8 @@ and how eDEX-DE behaves when one is missing.
 
 ## Status
 
-* **edex-comp runs on RustOS** since M37: on Linux DRM (bochs, virtio-gpu, simpledrm through
-  LinuxKPI, `cargo build --features linux-drivers`) with libseat's builtin seat, libinput and
+* **edex-comp runs on RustOS** since M37: on Linux DRM through LinuxKPI (`cargo build --features
+  linux-drivers`; tested on QEMU's bochs) with libseat's builtin seat, libinput and
   libudev-zero, rendering with **pixman** into DRM dumb buffers. RustOS's `desktop-edex` scenario
   boots it with `--run weston-terminal`, checks `edex-comp state`, a screendump and typing.
 * **edex-de and edex-greeter** build and are installed, but draw with wgpu (Vulkan or GLES through
