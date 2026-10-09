@@ -69,6 +69,30 @@ jobs:
             target/smoke/*.json
             target/smoke/*.log
 
+  smoke-labwc:
+    name: headless smoke test (labwc + llvmpipe)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: System dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libvulkan-dev libdbus-1-dev libegl-dev pkg-config \
+            labwc foot grim mesa-vulkan-drivers dbus fonts-jetbrains-mono python3
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked --bins
+      - name: labwc smoke test (foreign-toplevel backend, generated rc.xml)
+        run: scripts/smoke-labwc.sh target/debug/edex-de target/smoke-labwc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-labwc
+          path: |
+            target/smoke-labwc/*.png
+            target/smoke-labwc/*.json
+            target/smoke-labwc/*.log
+
   pkgbuild:
     name: makepkg (Arch container)
     runs-on: ubuntu-24.04

@@ -30,11 +30,19 @@ pub fn user_theme_dir() -> PathBuf {
     config_dir().join("themes")
 }
 
-/// System data directory (`/usr/share/edex-de`), overridable for development.
+/// System data directory: `$EDEX_SHARE_DIR` (development), else `/usr/share/edex-de`, else
+/// `/usr/local/share/edex-de` (installed under /usr/local, as on RustOS).
 pub fn system_share_dir() -> PathBuf {
-    std::env::var("EDEX_SHARE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/usr/share/edex-de"))
+    if let Some(dir) = std::env::var_os("EDEX_SHARE_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    let usr = PathBuf::from("/usr/share/edex-de");
+    let local = PathBuf::from("/usr/local/share/edex-de");
+    if !usr.exists() && local.exists() {
+        local
+    } else {
+        usr
+    }
 }
 
 pub fn hypr_config_dir() -> PathBuf {

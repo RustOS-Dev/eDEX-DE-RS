@@ -1,7 +1,9 @@
-//! eDEX greeter for greetd. Runs as a fullscreen window under `cage`.
+//! eDEX greeter for greetd (runs as a fullscreen window under `cage`), or with its own login
+//! backend on systems without PAM and greetd (RustOS, under labwc).
 
 mod config;
 mod greetd;
+mod local;
 mod screen;
 mod sessions;
 mod users;
@@ -30,15 +32,69 @@ use xkbcommon::xkb::keysyms as ks;
 #[derive(Parser, Debug)]
 #[command(name = "edex-greeter", version, about = "eDEX greeter for greetd")]
 struct Cli {
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
     /// Configuration file.
     #[arg(long, default_value = config::DEFAULT_PATH)]
     config: PathBuf,
     /// Run without greetd (renders the UI; Enter prints the session command).
     #[arg(long)]
     demo: bool,
+    /// Login backend: greetd ($GREETD_SOCK), local (passwd/shadow, SHA-512 crypt; for systems
+    /// without PAM such as RustOS), or auto (greetd when $GREETD_SOCK is set, local on
+    /// RustOS, else demo).
+    #[arg(long, default_value = "auto")]
+    backend: String,
+    /// Local backend: write the authenticated user's name here (else to stdout) and exit.
+    #[arg(long, value_name = "FILE")]
+    result: Option<PathBuf>,
     /// Exit after N seconds with a JSON report (CI).
     #[arg(long, value_name = "SECS")]
     smoke_test: Option<u64>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Cmd {
+    /// Become USER (uid, gid, HOME, USER, SHELL) and run COMMAND; for session scripts running
+    /// as root after a local login.
+    RunAs {
+        user: String,
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
+}
+
+/// Who checks passwords and starts the session.
+pub enum Backend {
+    Greetd(Greetd),
+    Local(local::LocalLogin),
+}
+
+impl Backend {
+    fn create_session(&mut self, user: &str) -> Result<Step> {
+        match self {
+            Backend::Greetd(g) => g.create_session(user),
+            Backend::Local(l) => l.create_session(user),
+        }
+    }
+    fn respond(&mut self, answer: Option<String>) -> Result<Step> {
+        match self {
+            Backend::Greetd(g) => g.respond(answer),
+            Backend::Local(l) => l.respond(answer),
+        }
+    }
+    fn start_session(&mut self, cmd: Vec<String>, env: Vec<String>) -> Result<()> {
+        match self {
+            Backend::Greetd(g) => g.start_session(cmd, env),
+            Backend::Local(l) => l.start_session(cmd, env),
+        }
+    }
+    fn cancel(&mut self) -> Result<()> {
+        match self {
+            Backend::Greetd(g) => g.cancel(),
+            Backend::Local(l) => l.cancel(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,7 +106,7 @@ pub enum Phase {
 }
 
 pub enum Event {
-    Greetd(Box<(Greetd, Result<Step>)>),
+    Greetd(Box<(Backend, Result<Step>)>),
     Tick,
 }
 
@@ -73,8 +129,9 @@ pub struct Greeter {
     pub clock: String,
     pub date: String,
     started: Instant,
-    greetd: Option<Greetd>,
+    greetd: Option<Backend>,
     demo: bool,
+    os: system::Os,
     tx: channel::Sender<Event>,
     quit: bool,
     exit_code: i32,
@@ -107,7 +164,7 @@ impl Greeter {
     }
 
     /// Run a greetd call on a worker thread; the result comes back as `Event::Greetd`.
-    fn call(&mut self, f: impl FnOnce(&mut Greetd) -> Result<Step> + Send + 'static) {
+    fn call(&mut self, f: impl FnOnce(&mut Backend) -> Result<Step> + Send + 'static) {
         let Some(mut g) = self.greetd.take() else {
             if self.demo {
                 self.demo_step();
@@ -245,7 +302,7 @@ impl Greeter {
         }
     }
 
-    fn on_greetd(&mut self, g: Greetd, step: Result<Step>) {
+    fn on_greetd(&mut self, g: Backend, step: Result<Step>) {
         self.greetd = Some(g);
         if self.phase == Phase::Starting {
             match step {
@@ -264,7 +321,13 @@ impl Greeter {
     }
 
     fn power(&mut self, action: system::LogindAction) {
-        if let Err(e) = system::power::logind(action) {
+        let res = match self.os {
+            system::Os::RustOs => {
+                system::rustos::power::logind(&system::RealRunner::default(), action)
+            }
+            system::Os::Linux => system::power::logind(action),
+        };
+        if let Err(e) = res {
             warn!("power action failed: {e:#}");
             self.set_message(format!("power action failed: {e}"), true);
         }
@@ -300,7 +363,9 @@ impl Greeter {
                     (self.session_idx + 1) % n
                 };
             }
-            ks::KEY_F2 if self.cfg.power_buttons => self.power(system::LogindAction::Suspend),
+            ks::KEY_F2 if self.cfg.power_buttons && self.can_suspend() => {
+                self.power(system::LogindAction::Suspend)
+            }
             ks::KEY_F3 if self.cfg.power_buttons => self.power(system::LogindAction::Reboot),
             ks::KEY_F4 if self.cfg.power_buttons => self.power(system::LogindAction::PowerOff),
             ks::KEY_BackSpace => {
@@ -323,6 +388,10 @@ impl Greeter {
             }
         }
         true
+    }
+
+    pub fn can_suspend(&self) -> bool {
+        system::Capabilities::for_os(self.os).suspend
     }
 
     fn active_input(&mut self) -> &mut String {
@@ -382,7 +451,16 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<i32> {
-    let cfg = config::load(&cli.config);
+    if let Some(Cmd::RunAs { user, command }) = &cli.cmd {
+        local::run_as(&local::Files::default(), user, command)?;
+        return Ok(1);
+    }
+    let os = system::Os::detect();
+    let mut cfg = config::load(&cli.config);
+    if os == system::Os::RustOs && !cli.config.exists() {
+        // RustOS has a single administrator account by default: root.
+        cfg.min_uid = 0;
+    }
     let share = settings_share_dir();
     let themes = ::ui::theme::load_themes(&[share.join("themes").as_path()]);
     let theme = themes
@@ -426,16 +504,30 @@ fn run(cli: Cli) -> Result<i32> {
         .position(|s| s.id == state.last_session)
         .or_else(|| sessions.iter().position(|s| s.id == cfg.default_session))
         .unwrap_or(0);
-    let greetd = if cli.demo {
-        None
-    } else {
-        match Greetd::from_env() {
-            Ok(g) => Some(g),
+    let local = || {
+        Backend::Local(local::LocalLogin::new(
+            local::Files::default(),
+            cli.result.clone(),
+        ))
+    };
+    let greetd = match cli.backend.as_str() {
+        _ if cli.demo => None,
+        "local" => Some(local()),
+        "greetd" => match Greetd::from_env() {
+            Ok(g) => Some(Backend::Greetd(g)),
             Err(e) => {
                 warn!("{e:#}; falling back to demo mode");
                 None
             }
-        }
+        },
+        _ => match Greetd::from_env() {
+            Ok(g) => Some(Backend::Greetd(g)),
+            Err(_) if os == system::Os::RustOs => Some(local()),
+            Err(e) => {
+                warn!("{e:#}; falling back to demo mode");
+                None
+            }
+        },
     };
     let demo = greetd.is_none();
     let mut g = Greeter {
@@ -465,6 +557,7 @@ fn run(cli: Cli) -> Result<i32> {
         started: Instant::now(),
         greetd,
         demo,
+        os,
         tx,
         quit: false,
         exit_code: 0,
@@ -589,7 +682,14 @@ fn run(cli: Cli) -> Result<i32> {
 }
 
 fn settings_share_dir() -> PathBuf {
-    std::env::var_os("EDEX_SHARE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/usr/share/edex-de"))
+    if let Some(d) = std::env::var_os("EDEX_SHARE_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d);
+    }
+    let usr = PathBuf::from("/usr/share/edex-de");
+    let local = PathBuf::from("/usr/local/share/edex-de");
+    if !usr.exists() && local.exists() {
+        local
+    } else {
+        usr
+    }
 }

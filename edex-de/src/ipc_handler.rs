@@ -136,7 +136,7 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
         }
         Request::Reload => {
             app.reload_config(platform);
-            app.export_hypr();
+            app.export_wm();
             Response::ok()
         }
         Request::State => Response::with_data(state_json(app, platform)),
@@ -163,11 +163,11 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
         }
         Request::Action { name } => match name.as_str() {
             "install" => {
-                let _ = launcher::runner::spawn_detached("edex-install", app.hypr.is_some());
+                app.spawn("edex-install");
                 Response::ok()
             }
             "lock" => {
-                let _ = launcher::runner::spawn_detached("hyprlock", app.hypr.is_some());
+                app.spawn("hyprlock");
                 Response::ok()
             }
             "new-tab" => {
@@ -191,6 +191,21 @@ fn handle(app: &mut App, platform: &mut Platform<AppEvent>, req: Request) -> Res
                     if keep { 1.0 } else { 0.0 },
                     !keep,
                 );
+                Response::ok()
+            }
+            // The focused window's controls (key bindings of compositors without eDEX's
+            // maximize, e.g. labwc's SUPER+F).
+            "maximize" | "minimize" | "close" => {
+                let Some(win) = app.state.windows.iter().find(|w| w.active && !w.minimized) else {
+                    return Response::err("no focused window");
+                };
+                let id = win.address.clone();
+                let action = match name.as_str() {
+                    "maximize" => crate::input::WindowAction::ToggleMaximize,
+                    "minimize" => crate::input::WindowAction::Minimize,
+                    _ => crate::input::WindowAction::Close,
+                };
+                crate::input::window_action(app, &id, action);
                 Response::ok()
             }
             "keyboard" => {
@@ -229,7 +244,18 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "frames": app.frames,
         "gpu": app.gpu.adapter_info(),
         "outputs": outputs,
-        "hyprland": {"connected": app.hypr_state.connected, "version": app.hypr_state.version, "workspaces": app.state.workspaces.len(), "active_window": app.state.active_window},
+        "hyprland": {"connected": app.wm.kind() == wm::WmKind::Hyprland && app.wm.state().connected, "version": app.wm.state().version, "workspaces": app.state.workspaces.len(), "active_window": app.state.active_window},
+        "wm": {
+            "kind": app.wm.kind().name(),
+            "name": app.wm.state().name,
+            "connected": app.wm.state().connected,
+            "version": app.wm.state().version,
+            "apps_cover_terminal": app.state.apps_cover_terminal,
+            "windows": app.state.windows.iter().map(|w| serde_json::json!({
+                "id": w.address, "class": w.class, "title": w.title, "active": w.active,
+                "minimized": w.minimized, "maximized": w.maximized, "floating": w.floating,
+            })).collect::<Vec<_>>(),
+        },
         "overlay": app.state.overlay.map(|k| format!("{k:?}").to_lowercase()),
         "focus": format!("{:?}", app.state.focus).to_lowercase(),
         "terminal": {"tabs": app.terminal.len(), "active": app.terminal.active_index(), "grid": app.terminal.grid_size(), "title": app.state.terminal.frame.title},

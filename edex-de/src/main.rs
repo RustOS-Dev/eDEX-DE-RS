@@ -20,7 +20,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "edex-de",
     version,
-    about = "eDEX-DE desktop shell for Hyprland"
+    about = "eDEX-DE desktop shell for Hyprland and labwc"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -28,8 +28,14 @@ struct Cli {
     /// Configuration file (default: $XDG_CONFIG_HOME/edex-de/config.toml).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
-    /// Do not connect to the Hyprland sockets (for running under another compositor).
-    #[arg(long, global = true)]
+    /// Window manager backend: hyprland (IPC sockets), labwc (wlr-foreign-toplevel; also
+    /// sway and other wlroots compositors), none, or auto (Hyprland when it is running, else
+    /// foreign-toplevel when the compositor offers it).
+    #[arg(long, global = true, value_name = "WM", default_value = "auto")]
+    wm: wm::WmChoice,
+    /// Same as `--wm labwc`: windows through wlr-foreign-toplevel, never Hyprland (older
+    /// scripts).
+    #[arg(long, global = true, hide = true)]
     no_hypr: bool,
     /// Run for N seconds, print a JSON report and exit (CI).
     #[arg(long, global = true, value_name = "SECS")]
@@ -45,17 +51,40 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Write the labwc configuration generated from the settings (rc.xml, environment,
+    /// menu.xml) into DIR (default ~/.config/edex-de/labwc) and exit.
+    LabwcConfig { dir: Option<PathBuf> },
 }
 
 fn main() {
     let cli = Cli::parse();
     let code = match cli.cmd {
         Some(Cmd::Ipc { args }) => ipc_cli(&args),
+        Some(Cmd::LabwcConfig { dir }) => {
+            let config_path = cli.config.unwrap_or_else(settings::config_path);
+            let mut config = settings::load(&config_path);
+            config.sanitize();
+            let dir = dir.unwrap_or_else(settings::labwc_export::config_dir);
+            match settings::labwc_export::export(&config, &dir) {
+                Ok(()) => {
+                    println!("{}", dir.display());
+                    0
+                }
+                Err(e) => {
+                    eprintln!("edex-de labwc-config: {e:#}");
+                    1
+                }
+            }
+        }
         _ => {
             init_logging();
             match app::run(app::RunOptions {
                 config_path: cli.config.unwrap_or_else(settings::config_path),
-                no_hypr: cli.no_hypr,
+                wm: if cli.no_hypr {
+                    wm::WmChoice::Labwc
+                } else {
+                    cli.wm
+                },
                 smoke: cli.smoke_test.map(Duration::from_secs),
             }) {
                 Ok(code) => code,

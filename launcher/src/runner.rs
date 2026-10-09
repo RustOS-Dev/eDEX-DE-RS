@@ -1,6 +1,7 @@
 //! Launch applications detached from the shell process.
 
 use std::{
+    os::unix::process::CommandExt,
     path::PathBuf,
     process::{Command, Stdio},
 };
@@ -14,8 +15,6 @@ use crate::desktop::{expand_exec, AppEntry};
 pub struct LaunchOptions {
     /// Command prefix used for `Terminal=true` entries or forced terminal launches.
     pub terminal_command: String,
-    /// When true, launch through Hyprland (`hl.dsp.exec_cmd`) so it opens on the current workspace.
-    pub via_hyprland: bool,
     pub force_terminal: bool,
 }
 
@@ -23,7 +22,6 @@ impl Default for LaunchOptions {
     fn default() -> Self {
         Self {
             terminal_command: "kitty -e".into(),
-            via_hyprland: false,
             force_terminal: false,
         }
     }
@@ -43,50 +41,44 @@ pub fn command_line(app: &AppEntry, opts: &LaunchOptions) -> String {
     cmd
 }
 
-/// Launch an entry. Never blocks and never leaves a zombie: the child is double-forked via
-/// `setsid` so it is reparented to init.
+/// Launch an entry directly (the shell launches through the window manager first when it can).
 pub fn launch(app: &AppEntry, opts: &LaunchOptions) -> Result<()> {
     let cmd = command_line(app, opts);
     info!(app = %app.id, %cmd, "launching");
-    spawn_detached(&cmd, opts.via_hyprland)
+    spawn_detached(&cmd)
 }
 
-/// Spawn an arbitrary shell command detached from the shell.
-pub fn spawn_detached(cmd: &str, via_hyprland: bool) -> Result<()> {
-    if via_hyprland {
-        if let Some(socket) = hypr::HyprSocket::from_env() {
-            match socket.exec(cmd) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    tracing::warn!("launching through Hyprland failed, spawning directly: {e:#}")
-                }
-            }
-        }
-    }
+/// Spawn a shell command detached from the shell. Never blocks and never leaves a zombie: `sh`
+/// runs in a new session, starts the command in the background and exits at once, so the
+/// command is reparented to init (and survives a shell restart).
+pub fn spawn_detached(cmd: &str) -> Result<()> {
     // In its own transient scope when systemd is around: otherwise the app lives in the shell's
     // service cgroup and a shell restart (or crash + Restart=on-failure) would kill it.
-    let mut launcher = Command::new("setsid");
-    launcher.arg("-f");
-    if in_systemd_user_session() {
-        launcher.args([
-            "systemd-run",
-            "--user",
-            "--scope",
-            "--quiet",
-            "--collect",
-            "--",
-        ]);
-    }
-    let mut child = launcher
-        .arg("sh")
+    let line = if in_systemd_user_session() {
+        format!(
+            "systemd-run --user --scope --quiet --collect -- sh -c {} &",
+            crate::desktop::shell_quote(cmd)
+        )
+    } else {
+        format!("{{ {cmd}\n}} &")
+    };
+    let mut child = Command::new("sh");
+    child
         .arg("-c")
-        .arg(cmd)
+        .arg(line)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| format!("spawning `{cmd}`"))?;
-    // `setsid -f` forks and exits immediately; reap it so it never becomes a zombie.
+        .stderr(Stdio::null());
+    unsafe {
+        child.pre_exec(|| {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = child.spawn().with_context(|| format!("spawning `{cmd}`"))?;
+    // `sh` exits as soon as the command is in the background; reap it.
     std::thread::spawn(move || {
         let _ = child.wait();
     });
@@ -140,7 +132,7 @@ mod tests {
     #[test]
     fn detached_spawn_returns_immediately() {
         let start = std::time::Instant::now();
-        spawn_detached("sleep 2", false).unwrap();
+        spawn_detached("sleep 2").unwrap();
         assert!(start.elapsed().as_millis() < 1000);
     }
 }

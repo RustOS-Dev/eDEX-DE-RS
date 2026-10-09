@@ -121,6 +121,10 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
     };
     Ok(match cmd {
         "ping" => Request::Ping,
+        // `edex-de ipc launcher` (and the other overlays): show it.
+        "launcher" | "settings" | "privacy" | "notifications" | "power" => Request::Show {
+            target: cmd.parse()?,
+        },
         "toggle" => Request::Toggle {
             target: arg(&mut it, "target")?.parse()?,
         },
@@ -195,6 +199,16 @@ pub fn parse_args(args: &[String]) -> Result<Request, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overlay_shorthand_shows_it() {
+        assert_eq!(
+            parse_args(&["launcher".to_string()]).unwrap(),
+            Request::Show {
+                target: Target::Launcher
+            }
+        );
+    }
 
     #[test]
     fn parses_cli_and_roundtrips_json() {

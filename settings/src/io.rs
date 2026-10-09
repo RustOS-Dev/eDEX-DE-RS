@@ -30,7 +30,7 @@ pub fn load(path: &Path) -> Config {
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let c = Config::default();
+            let c = system_default();
             match save(path, &c) {
                 Ok(()) => info!("wrote default config to {}", path.display()),
                 Err(e) => warn!("could not write default config: {e:#}"),
@@ -41,6 +41,29 @@ pub fn load(path: &Path) -> Config {
             warn!("cannot read {}: {e}; using defaults", path.display());
             Config::default()
         }
+    }
+}
+
+/// Defaults for a first start: the distribution's `config.toml` in the system share directory
+/// (e.g. RustOS sets foot as the terminal), or the built-in defaults.
+pub fn system_default() -> Config {
+    let path = crate::paths::system_share_dir().join("config.toml");
+    match fs::read_to_string(&path) {
+        Ok(text) => match toml::from_str::<Config>(&text) {
+            Ok(mut c) => {
+                c.sanitize();
+                info!("first start: defaults from {}", path.display());
+                c
+            }
+            Err(e) => {
+                warn!(
+                    "{} is invalid ({e}); using built-in defaults",
+                    path.display()
+                );
+                Config::default()
+            }
+        },
+        Err(_) => Config::default(),
     }
 }
 

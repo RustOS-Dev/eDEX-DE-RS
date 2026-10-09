@@ -1,8 +1,10 @@
-//! eDEX-DE configuration: `~/.config/edex-de/config.toml`, live reload and Hyprland export.
+//! eDEX-DE configuration: `~/.config/edex-de/config.toml`, live reload and the window
+//! manager export (Hyprland Lua, labwc rc.xml).
 
 pub mod config;
 pub mod hypr_export;
 pub mod io;
+pub mod labwc_export;
 pub mod paths;
 
 pub use config::*;

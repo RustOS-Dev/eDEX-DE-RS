@@ -208,10 +208,10 @@ pub fn system_reply(app: &mut App, platform: &mut Platform<AppEvent>, reply: Sys
         SysReply::About(a) => app.sys.about = a,
         SysReply::TailscaleLoginUrl(url) => {
             app.sys.tailscale_login_url = Some(url.clone());
-            let _ = launcher::runner::spawn_detached(
-                &format!("xdg-open {}", launcher::desktop::shell_quote(&url)),
-                true,
-            );
+            app.spawn(&format!(
+                "xdg-open {}",
+                launcher::desktop::shell_quote(&url)
+            ));
             push_local_notification(
                 app,
                 platform,

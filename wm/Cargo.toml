@@ -1,20 +1,19 @@
 [package]
-name = "launcher"
+name = "wm"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "eDEX-DE app launcher"
+description = "eDEX-DE window-manager backends: Hyprland IPC and wlr-foreign-toplevel (labwc)"
 
 [dependencies]
-fuzzy-matcher = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tracing = { workspace = true }
+hypr = { path = "../hypr" }
+platform = { path = "../platform" }
+settings = { path = "../settings" }
+ui = { path = "../ui" }
 anyhow = { workspace = true }
-xdg = { workspace = true }
-rustix = { workspace = true }
+tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]

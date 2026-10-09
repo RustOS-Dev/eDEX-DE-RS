@@ -9,7 +9,8 @@ pub enum AppEvent {
     Term(TermEvent),
     Notify(ServerEvent),
     Sys(SysReply),
-    HyprReadable,
+    /// The window manager's event socket is readable (Hyprland).
+    WmReadable,
     IpcReadable,
     Tick(Tick),
 }

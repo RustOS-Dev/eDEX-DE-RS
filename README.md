@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/eDEX-OS/eDEX-DE?include_prereleases)](https://github.com/eDEX-OS/eDEX-DE/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-cyan.svg)](LICENSE)
 
-**eDEX-DE** is a sci-fi desktop shell for [Hyprland](https://hyprland.org), written in Rust and drawn with
+**eDEX-DE** is a sci-fi desktop shell for [Hyprland](https://hyprland.org) and [labwc](https://labwc.github.io), written in Rust and drawn with
 wgpu, in the style of [eDEX-UI](https://github.com/GitSquared/edex-ui). Hyprland tiles your applications;
 eDEX-DE draws everything around them: the terminal, file browser, system dashboard, on-screen keyboard,
 status bars, launcher, settings, privacy panel, notifications, power menu and the login screen.
@@ -68,9 +68,45 @@ For development, run the shell inside a nested Hyprland (or any wlr-layer-shell 
 
 ```bash
 EDEX_SHARE_DIR=$PWD/share cargo run -p edex-de -- run            # on Hyprland
-EDEX_SHARE_DIR=$PWD/share cargo run -p edex-de -- run --no-hypr  # on sway etc.
+EDEX_SHARE_DIR=$PWD/share cargo run -p edex-de -- run --wm labwc # on labwc, sway etc.
 cargo run -p edex-greeter -- --demo                              # greeter without greetd
 ```
+
+## Window managers: Hyprland, labwc and others
+
+The shell draws on any compositor with `zwlr_layer_shell_v1`; the window manager behind it is a
+backend (`edex-de run --wm …`, default `auto`):
+
+| `--wm` | What it uses | Tab strip | Settings → Window manager |
+|---|---|---|---|
+| `hyprland` | Hyprland's IPC sockets | windows of the current workspace, workspaces in the top bar | `generated.lua` (gaps, layout, blur…) |
+| `labwc` | `zwlr_foreign_toplevel_management_v1` (also sway, wayfire…) | every window; activate, minimize, maximize, close | labwc's `rc.xml` (see below) |
+| `none` | — | terminal tabs only | — |
+
+`auto` picks Hyprland when `HYPRLAND_INSTANCE_SIGNATURE` names a running instance, else
+foreign-toplevel when the compositor offers it.
+
+On labwc, eDEX's configuration (`edex-de labwc-config` writes it into `~/.config/edex-de/labwc`;
+the settings panel regenerates it and labwc reconfigures) maximizes every normal window: labwc fits
+maximized windows into the area the shell's reserver surfaces leave, which is the terminal slot,
+and draws no title bar on them. Un-maximize a window (SUPER+V) to float it. Run the session as
+
+```bash
+labwc -C ~/.config/edex-de/labwc -s 'edex-de run --wm labwc'
+```
+
+labwc has one workspace here, and no blur, animations or tiling layouts, so those rows are hidden.
+
+## Other systems (RustOS)
+
+The `system` crate detects the operating system (`EDEX_SYSTEM=linux|rustos` overrides) and uses its
+backends: on [RustOS](https://github.com/RustOS-Dev/RustOS) the ALSA mixer (or OSS), `wifi`/`ip`,
+`bt`, /sys batteries and backlights, `poweroff`/`reboot`, /etc/passwd and the commands /etc/rc
+starts. Rows without a backend there are hidden: Tor, Tailscale, VPNs, fingerprint readers,
+suspend and hibernate, screen locking, power profiles. D-Bus is optional: without a session bus
+there is no notifications server, and everything else works. `edex-greeter --backend local`
+replaces greetd and PAM with a passwd/shadow (SHA-512 crypt) check. RustOS builds eDEX-DE as its
+desktop (`ports/edex-de` there).
 
 ## How a session starts
 
@@ -257,6 +293,8 @@ Themes are TOML files (see `themes/tron.toml` for the full schema). Switch live 
   layout snapshots and parsers for every CLI backend.
 * `scripts/smoke-sway.sh` — headless sway + llvmpipe: renders the shell, sends a notification, tiles a
   real window into the terminal slot, opens every overlay and stores screenshots under `target/smoke/`.
+* `scripts/smoke-labwc.sh` — headless labwc with the generated rc.xml: a `foot` window tiles into the
+  terminal slot, shows as a tab, maximizes, minimizes and closes through the foreign-toplevel backend.
 * `scripts/smoke-greeter.sh` — renders the greeter in demo mode.
 * `scripts/build-pkg.sh` — builds the Arch package from the checkout (CI runs it in an Arch container).
 

@@ -47,7 +47,7 @@ pub fn set_night_light(r: &dyn CommandRunner, on: bool, temp: u32) -> Result<()>
         {
             return Ok(());
         }
-        launcher::runner::spawn_detached(&format!("hyprsunset -t {temp}"), false)?;
+        launcher::runner::spawn_detached(&format!("hyprsunset -t {temp}"))?;
         Ok(())
     } else {
         if r.run("hyprctl", &["hyprsunset", "identity"])

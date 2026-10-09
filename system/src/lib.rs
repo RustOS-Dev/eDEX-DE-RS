@@ -9,9 +9,11 @@ pub mod display;
 pub mod fprint;
 pub mod input;
 pub mod network;
+pub mod os;
 pub mod power;
 pub mod privacy;
 pub mod runner;
+pub mod rustos;
 pub mod services;
 pub mod users;
 
@@ -21,6 +23,7 @@ use std::{
 };
 
 use hypr::HyprSocket;
+pub use os::{Capabilities, Os};
 pub use power::LogindAction;
 pub use runner::{CommandRunner, FakeRunner, RealRunner};
 pub use services::UnitAction;
@@ -131,6 +134,8 @@ pub enum SysRequest {
     },
     AboutQuery {
         gpu: Option<String>,
+        /// The window manager and its version, e.g. "labwc 0.20.2".
+        wm: Option<String>,
     },
 }
 
@@ -174,11 +179,18 @@ impl SystemBackend {
             .name("edex-system".into())
             .spawn(move || {
                 let hypr = HyprSocket::from_env();
+                let os = Os::detect();
                 while let Ok(first) = rx.recv() {
                     let mut pending = vec![first];
                     pending.extend(rx.try_iter());
                     for req in schedule(pending) {
-                        for r in handle(&*runner, hypr.as_ref(), req, &sink) {
+                        let replies = match os {
+                            Os::RustOs => handle_rustos(&*runner, req, &sink),
+                            Os::Linux => Err(Box::new(req)),
+                        };
+                        let replies = replies
+                            .unwrap_or_else(|req| handle(&*runner, hypr.as_ref(), *req, &sink));
+                        for r in replies {
                             sink(r);
                         }
                     }
@@ -245,6 +257,95 @@ fn done(what: &str, res: anyhow::Result<()>) -> SysReply {
             message: format!("{e:#}"),
         },
     }
+}
+
+fn unsupported(what: &str) -> SysReply {
+    done(
+        what,
+        Err(anyhow::anyhow!("{}", os::unavailable_note(Os::detect()))),
+    )
+}
+
+/// RustOS's backends; `Err(req)` hands a request to the shared code (display, input layouts,
+/// privacy, about).
+fn handle_rustos(
+    r: &dyn CommandRunner,
+    req: SysRequest,
+    _sink: &Arc<dyn Fn(SysReply) + Send + Sync>,
+) -> Result<Vec<SysReply>, Box<SysRequest>> {
+    use rustos as ro;
+    use SysRequest as Q;
+    let audio = |res| vec![done("audio", res), SysReply::Audio(ro::audio::query(r))];
+    let net = |what: &str, res| {
+        vec![
+            done(what, res),
+            SysReply::Network(ro::network::query(r, false)),
+        ]
+    };
+    let bt = |res| {
+        vec![
+            done("bluetooth", res),
+            SysReply::Bluetooth(ro::bluetooth::query(r)),
+        ]
+    };
+    Ok(match req {
+        Q::AudioQuery => vec![SysReply::Audio(ro::audio::query(r))],
+        Q::AudioSetVolume(v) => audio(ro::audio::set_volume(r, v)),
+        Q::AudioAdjustVolume(d) => audio(ro::audio::adjust_volume(r, d)),
+        Q::AudioToggleMute => audio(ro::audio::toggle_mute(r)),
+        Q::AudioToggleMicMute => audio(ro::audio::toggle_mic_mute(r)),
+        Q::AudioSetDefault(_) => vec![unsupported("audio")],
+        Q::BrightnessQuery => vec![SysReply::Brightness(ro::brightness::query())],
+        Q::BrightnessAdjust(d) => match ro::brightness::adjust(d) {
+            Ok(s) => vec![SysReply::Brightness(s)],
+            Err(e) => vec![done("brightness", Err(e))],
+        },
+        Q::BrightnessSet(p) => match ro::brightness::set(p) {
+            Ok(s) => vec![SysReply::Brightness(s)],
+            Err(e) => vec![done("brightness", Err(e))],
+        },
+        Q::NetworkQuery { rescan } => vec![SysReply::Network(ro::network::query(r, rescan))],
+        Q::WifiConnect { ssid, password } => net(
+            "wifi",
+            ro::network::wifi_connect(r, &ssid, password.as_deref()),
+        ),
+        Q::ConnectionUp(n) => net("connection", ro::network::connection_up(r, &n)),
+        Q::ConnectionDown(n) => net("connection", ro::network::connection_down(r, &n)),
+        Q::ConnectionDelete(n) => net("connection", ro::network::connection_delete(r, &n)),
+        Q::WifiRadio(_) => vec![unsupported("wifi")],
+        Q::Airplane(_) => vec![unsupported("airplane")],
+        Q::VpnImport(_) => vec![unsupported("vpn-import")],
+        Q::WireguardCreate(_) => vec![unsupported("wireguard")],
+        Q::BluetoothQuery => vec![SysReply::Bluetooth(ro::bluetooth::query(r))],
+        Q::BluetoothPower(on) => bt(ro::bluetooth::power(r, on)),
+        Q::BluetoothScan(on) => bt(ro::bluetooth::scan(r, on)),
+        Q::BluetoothPair(m) => bt(ro::bluetooth::pair(r, &m)),
+        Q::BluetoothConnect(m) => bt(ro::bluetooth::connect(r, &m)),
+        Q::BluetoothDisconnect(m) => bt(ro::bluetooth::disconnect(r, &m)),
+        Q::BluetoothRemove(m) => bt(ro::bluetooth::remove(r, &m)),
+        Q::PowerQuery => vec![SysReply::Power(ro::power::query(r))],
+        Q::SetPowerProfile(_) => vec![unsupported("power-profile")],
+        Q::Logind(a) => vec![done("power", ro::power::logind(r, a))],
+        Q::SetLidAction(_) => vec![unsupported("lid")],
+        Q::UsersQuery => vec![SysReply::Users(ro::users::query())],
+        Q::SetRealName { .. } | Q::SetUserLocked { .. } => vec![unsupported("user")],
+        Q::ServicesQuery { user } => vec![SysReply::Services(ro::services::query(r, user))],
+        Q::UnitAction { user, unit, action } => vec![
+            done("unit", ro::services::act(r, user, &unit, action)),
+            SysReply::Services(ro::services::query(r, user)),
+        ],
+        Q::FprintQuery { .. } => vec![SysReply::Fprint(fprint::FprintState::default())],
+        Q::FprintEnroll { .. } | Q::FprintDeleteAll { .. } => vec![unsupported("fprint")],
+        Q::TorMode(_) | Q::TorNewnym | Q::TorBridges { .. } => vec![unsupported("tor")],
+        Q::TailscaleUp
+        | Q::TailscaleDown
+        | Q::TailscaleLogin
+        | Q::TailscaleExitNode(_)
+        | Q::TailscaleAllowLan(_)
+        | Q::TailscaleAdvertiseExit(_) => vec![unsupported("tailscale")],
+        Q::NightLight { .. } => vec![unsupported("night-light")],
+        other => return Err(Box::new(other)),
+    })
 }
 
 fn handle(
@@ -394,7 +495,13 @@ fn handle(
             vec![done("night-light", display::set_night_light(r, on, temp))]
         }
         Q::InputLayouts => vec![SysReply::InputLayouts(input::layouts(
-            "/usr/share/X11/xkb/rules/evdev.xml",
+            [
+                "/usr/share/X11/xkb/rules/evdev.xml",
+                "/usr/local/share/X11/xkb/rules/evdev.xml",
+            ]
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .unwrap_or("/usr/share/X11/xkb/rules/evdev.xml"),
         ))],
         Q::ApplyInput {
             kb_layout,
@@ -469,9 +576,11 @@ fn handle(
             done("fprint", fprint::delete_all(&user)),
             SysReply::Fprint(fprint::query(&user)),
         ],
-        Q::AboutQuery { gpu } => {
+        Q::AboutQuery { gpu, wm } => {
             let hv = hypr
                 .and_then(|s| s.version().ok())
+                .map(|v| format!("Hyprland {v}"))
+                .or(wm)
                 .unwrap_or_else(|| "not connected".into());
             vec![SysReply::About(about::query(gpu, hv))]
         }

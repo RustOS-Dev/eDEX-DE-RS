@@ -55,6 +55,9 @@ pub enum PlatformEvent<E> {
     OutputAdded(OutputInfo),
     OutputChanged(OutputInfo),
     OutputRemoved(OutputId),
+    /// The window list of `zwlr_foreign_toplevel_management_v1` changed (see
+    /// [`crate::Platform::toplevels`]).
+    ToplevelsChanged,
     /// The compositor configured a surface: the size is in logical pixels, the scale is
     /// the fractional (or integer) scale to render at.
     Configure {

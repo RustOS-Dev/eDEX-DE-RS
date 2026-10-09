@@ -28,7 +28,8 @@ sized from the primary output's terminal rect using measured cell metrics.
 ## Crates
 
 * `platform` — sctk 0.21 client: outputs, layer surfaces, xdg window (greeter), keyboard with repeat,
-  pointer, cursor shapes, fractional scale, clipboard via the data device.
+  pointer, cursor shapes, fractional scale, clipboard via the data device, and the compositor's
+  window list through `zwlr_foreign_toplevel_management_v1`.
 * `renderer` — `GpuContext` (instance/adapter/device, cosmic-text `FontSystem`) and `SurfaceRenderer`
   per surface: instanced SDF rectangles (panels, key caps, circles, hexagons, glow), scanlines, glyphon text
   with a content-keyed cache.
@@ -37,12 +38,16 @@ sized from the primary output's terminal rect using measured cell metrics.
 * `terminal` — tabs over `alacritty_terminal::Term`; key encoding, mouse reporting, selection, frame
   extraction into `ui::terminal_model::TerminalFrame`.
 * `hypr` — IPC socket client (`j/` JSON requests, dispatch, eval, reload) and event stream parser.
+* `wm` — the window-manager backend trait (`WindowManager`) and the generic window/workspace model
+  the tab strip uses; backends: Hyprland (over `hypr`), labwc/wlroots (foreign-toplevel windows from
+  `platform::Toplevels`, rc.xml export, reconfigure and exit through `LABWC_PID`) and none.
 * `ipc` — newline-delimited JSON protocol, server and CLI parser.
 * `settings` — config schema with defaults, atomic save, file watcher, Lua/hypridle export.
 * `launcher` — desktop entry scanning, fuzzy search with history, detached launching via Hyprland.
 * `notifications` — zbus server for `org.freedesktop.Notifications` and the store/history.
 * `sysmon` — sysinfo-based collector, battery, privacy probes.
-* `system` — `CommandRunner` abstraction with real/fake runners; audio, brightness, network, bluetooth,
+* `system` — `CommandRunner` abstraction with real/fake runners; `Os` detection and `Capabilities`
+  (rows without a backend are hidden); the `rustos` backend set (ALSA, `wifi`/`ip`, `bt`, /sys, /etc/rc); audio, brightness, network, bluetooth,
   power (upower/logind over zbus), users, services, display, input, privacy (tor control port, tailscale),
   fprintd (zbus), about. `SystemBackend` runs requests on a worker thread.
 * `edex-de` — the application: event routing, rendering, input, overlays, forms, IPC handler.

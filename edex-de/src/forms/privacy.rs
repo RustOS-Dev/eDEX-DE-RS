@@ -64,10 +64,32 @@ pub struct PrivacyScratch {
 const MODES: [&str; 3] = ["off", "socks5", "transparent"];
 const BRIDGES: [&str; 3] = ["none", "snowflake", "obfs4"];
 
+/// The tabs with a backend on this system (`TAB_*` ids, in order).
+fn visible_tabs(app: &App) -> Vec<usize> {
+    let caps = &app.caps;
+    (0..TABS.len())
+        .filter(|&t| match t {
+            TAB_TOR => caps.tor,
+            TAB_TAILSCALE => caps.tailscale,
+            TAB_VPN => caps.vpn,
+            _ => true,
+        })
+        .collect()
+}
+
+fn active_tab(app: &App) -> usize {
+    visible_tabs(app)
+        .get(app.state.privacy.active)
+        .copied()
+        .unwrap_or(TAB_DEVICES)
+}
+
 pub fn open(app: &mut App) {
+    let tabs = visible_tabs(app);
     let f = &mut app.state.privacy;
     f.title = "PRIVACY".into();
-    f.tabs = TABS.iter().map(|s| s.to_string()).collect();
+    f.tabs = tabs.iter().map(|&t| TABS[t].to_string()).collect();
+    f.active = f.active.min(tabs.len() - 1);
     f.status = None;
     app.pscratch.bridges = BRIDGES
         .iter()
@@ -81,15 +103,26 @@ pub fn open(app: &mut App) {
     rebuild(app);
 }
 
-pub fn select_tab(app: &mut App, tab: usize) {
+/// Select the tab at position `pos` of the visible tabs.
+pub fn select_tab(app: &mut App, pos: usize) {
+    let n = visible_tabs(app).len();
     let f = &mut app.state.privacy;
-    f.active = tab.min(TABS.len() - 1);
+    f.active = pos.min(n - 1);
     f.form_state = Default::default();
     rebuild(app);
 }
 
+/// Select a tab by its `TAB_*` id (the first visible one when it is hidden).
+pub fn show_tab(app: &mut App, tab: usize) {
+    let pos = visible_tabs(app)
+        .iter()
+        .position(|&t| t == tab)
+        .unwrap_or(0);
+    select_tab(app, pos);
+}
+
 pub fn rebuild(app: &mut App) {
-    let form = match app.state.privacy.active {
+    let form = match active_tab(app) {
         TAB_TOR => tor(app),
         TAB_TAILSCALE => tailscale(app),
         TAB_VPN => vpn(app),
@@ -395,81 +428,105 @@ fn dns(app: &App) -> Form {
             info(0, "Test query", d.test_result.clone()),
             button(id::DNS_TEST, "Resolve check.torproject.org", "TEST"),
         ])
-        .section("Firewall", vec![
+        .section("Firewall", if app.caps.firewall { vec![
             info(0, "nftables", if app.sys.privacy.firewall_active { "active" } else { "inactive" }),
             note(0, "Inbound connections are dropped except on the Tailscale interface. Tor transparent mode adds a fail-closed output policy."),
-        ])
+        ] } else {
+            vec![note(0, &format!("Firewall: {}.", system::os::unavailable_note(app.caps.os)))]
+        })
 }
 
 fn devices(app: &App) -> Form {
     let s = &app.state.status;
     let f = &app.sys.fprint;
+    let caps = &app.caps;
     let enrolled = f
         .enrolled
         .iter()
         .map(|e| item(e.clone(), "", false, None))
         .collect();
-    Form::default()
-        .section(
-            "Live indicators",
-            vec![
-                info(
-                    0,
-                    "Microphone",
-                    if s.mic_active { "IN USE" } else { "idle" },
+    let mut live = vec![
+        info(
+            0,
+            "Microphone",
+            if s.mic_active { "IN USE" } else { "idle" },
+        ),
+        info(0, "Camera", if s.camera_active { "IN USE" } else { "idle" }),
+    ];
+    if caps.fingerprint {
+        live.push(info(
+            0,
+            "Fingerprint daemon",
+            if s.fprintd_active { "active" } else { "idle" },
+        ));
+    }
+    if caps.tor {
+        live.push(info(
+            0,
+            "Tor",
+            format!(
+                "{}{}",
+                s.tor_mode,
+                if s.tor_active {
+                    " (daemon running)"
+                } else {
+                    ""
+                }
+            ),
+        ));
+    }
+    if caps.tailscale {
+        live.push(info(
+            0,
+            "Tailscale",
+            if s.tailscale_active {
+                "connected"
+            } else {
+                "disconnected"
+            },
+        ));
+    }
+    if caps.vpn {
+        live.push(info(
+            0,
+            "VPN",
+            if s.vpn_active { "active" } else { "inactive" },
+        ));
+    }
+    let form = Form::default().section("Live indicators", live);
+    if !caps.fingerprint {
+        return form.section(
+            "Not available",
+            vec![note(
+                0,
+                &format!(
+                    "Tor, Tailscale, VPNs and fingerprint readers are {}.",
+                    system::os::unavailable_note(caps.os)
                 ),
-                info(0, "Camera", if s.camera_active { "IN USE" } else { "idle" }),
-                info(
-                    0,
-                    "Fingerprint daemon",
-                    if s.fprintd_active { "active" } else { "idle" },
-                ),
-                info(
-                    0,
-                    "Tor",
-                    format!(
-                        "{}{}",
-                        s.tor_mode,
-                        if s.tor_active {
-                            " (daemon running)"
-                        } else {
-                            ""
-                        }
-                    ),
-                ),
-                info(
-                    0,
-                    "Tailscale",
-                    if s.tailscale_active {
-                        "connected"
-                    } else {
-                        "disconnected"
-                    },
-                ),
-                info(0, "VPN", if s.vpn_active { "active" } else { "inactive" }),
-            ],
-        )
-        .section(
-            "Fingerprint",
-            vec![
-                info(
-                    0,
-                    "Reader",
-                    if f.available {
-                        f.device.clone()
-                    } else {
-                        "none".into()
-                    },
-                ),
-                list(
-                    id::FP_ENROLLED,
-                    "Enrolled fingers",
-                    enrolled,
-                    None,
-                    "none — enrol under Settings → Security",
-                ),
-            ],
-        )
+            )],
+        );
+    }
+    form.section(
+        "Fingerprint",
+        vec![
+            info(
+                0,
+                "Reader",
+                if f.available {
+                    f.device.clone()
+                } else {
+                    "none".into()
+                },
+            ),
+            list(
+                id::FP_ENROLLED,
+                "Enrolled fingers",
+                enrolled,
+                None,
+                "none — enrol under Settings → Security",
+            ),
+        ],
+    )
 }
 
 pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: Change) {

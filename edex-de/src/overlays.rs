@@ -26,11 +26,16 @@ pub fn prepare(app: &mut App, kind: OverlayKind) {
             app.state.power.selected = 0;
             app.state.power.confirm = None;
             let p = &app.sys.power;
-            let mut available = vec![PowerAction::Lock, PowerAction::Logout];
-            if p.can_suspend || !app.sys.power.profiles.is_empty() {
+            let caps = &app.caps;
+            let mut available = Vec::new();
+            if caps.lock {
+                available.push(PowerAction::Lock);
+            }
+            available.push(PowerAction::Logout);
+            if caps.suspend && (p.can_suspend || !app.sys.power.profiles.is_empty()) {
                 available.push(PowerAction::Suspend);
             }
-            if p.can_hibernate {
+            if caps.hibernate && p.can_hibernate {
                 available.push(PowerAction::Hibernate);
             }
             available.push(PowerAction::Reboot);
@@ -116,13 +121,12 @@ fn launch_selected(app: &mut App, platform: &mut Platform<AppEvent>, force_termi
     };
     let opts = launcher::LaunchOptions {
         terminal_command: app.config.launcher.terminal_command.clone(),
-        via_hyprland: app.hypr.is_some(),
         force_terminal,
     };
-    match launcher::launch(&entry, &opts) {
-        Ok(()) => app.launch_history.record(&entry.id),
-        Err(e) => tracing::warn!("launch {}: {e:#}", entry.id),
-    }
+    let cmd = launcher::runner::command_line(&entry, &opts);
+    tracing::info!(app = %entry.id, %cmd, "launching");
+    app.spawn(&cmd);
+    app.launch_history.record(&entry.id);
     app.close_overlay(platform);
 }
 
@@ -131,17 +135,13 @@ fn run_power(app: &mut App, platform: &mut Platform<AppEvent>, action: PowerActi
     app.close_overlay(platform);
     match action {
         PowerAction::Lock => {
-            let _ = launcher::runner::spawn_detached(
-                "hyprlock || loginctl lock-session",
-                app.hypr.is_some(),
-            );
+            app.spawn("hyprlock || loginctl lock-session");
         }
         PowerAction::Logout => {
-            let ok = app.hypr.as_ref().map(|h| h.exit().is_ok()).unwrap_or(false);
-            if !ok {
+            if let Err(e) = app.wm.exit() {
+                tracing::info!("window manager logout: {e:#}; ending the session");
                 let _ = launcher::runner::spawn_detached(
                     "loginctl terminate-session \"$XDG_SESSION_ID\"",
-                    false,
                 );
                 app.quit = true;
             }

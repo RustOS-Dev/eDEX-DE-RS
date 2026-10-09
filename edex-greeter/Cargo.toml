@@ -28,6 +28,7 @@ calloop = { workspace = true }
 serde_json = { workspace = true }
 clap = { workspace = true }
 image = { workspace = true }
+sha-crypt = "0.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }

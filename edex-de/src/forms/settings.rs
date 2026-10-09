@@ -163,21 +163,52 @@ pub struct SettingsScratch {
     pub mon_disabled: bool,
 }
 
+/// The tabs this system has backends for (as `TAB_*` ids, in order).
+fn visible_tabs(app: &App) -> Vec<usize> {
+    let caps = &app.caps;
+    (0..TABS.len())
+        .filter(|&t| match t {
+            // Screen lock, fingerprint, firewall and keyring.
+            TAB_SECURITY => caps.lock || caps.fingerprint || caps.firewall || caps.keyring,
+            _ => true,
+        })
+        .collect()
+}
+
+/// The `TAB_*` id of the selected tab.
+fn active_tab(app: &App) -> usize {
+    let tabs = visible_tabs(app);
+    tabs.get(app.state.settings.active)
+        .copied()
+        .unwrap_or(TAB_APPEARANCE)
+}
+
 pub fn open(app: &mut App) {
+    let tabs = visible_tabs(app);
     let forms = &mut app.state.settings;
     forms.title = "SETTINGS".into();
-    forms.tabs = TABS.iter().map(|s| s.to_string()).collect();
+    forms.tabs = tabs.iter().map(|&t| TABS[t].to_string()).collect();
+    forms.active = forms.active.min(tabs.len() - 1);
     forms.status = None;
-    request_for_tab(app, app.state.settings.active);
+    request_for_tab(app, active_tab(app));
     rebuild(app);
 }
 
-pub fn select_tab(app: &mut App, tab: usize) {
+/// Select the tab at position `pos` of the visible tabs.
+pub fn select_tab(app: &mut App, pos: usize) {
+    let n = visible_tabs(app).len();
     let forms = &mut app.state.settings;
-    forms.active = tab.min(TABS.len() - 1);
+    forms.active = pos.min(n - 1);
     forms.form_state = Default::default();
-    request_for_tab(app, tab);
+    request_for_tab(app, active_tab(app));
     rebuild(app);
+}
+
+/// Select a tab by its `TAB_*` id (ignored when hidden).
+pub fn show_tab(app: &mut App, tab: usize) {
+    if let Some(pos) = visible_tabs(app).iter().position(|&t| t == tab) {
+        select_tab(app, pos);
+    }
 }
 
 fn request_for_tab(app: &mut App, tab: usize) {
@@ -203,6 +234,12 @@ fn request_for_tab(app: &mut App, tab: usize) {
         }],
         TAB_ABOUT => vec![SysRequest::AboutQuery {
             gpu: app.gpu.adapter_info(),
+            wm: Some(
+                format!("{} {}", app.wm.state().name, app.wm.state().version)
+                    .trim()
+                    .to_string(),
+            )
+            .filter(|s| !s.is_empty()),
         }],
         _ => vec![],
     };
@@ -212,7 +249,7 @@ fn request_for_tab(app: &mut App, tab: usize) {
 }
 
 pub fn rebuild(app: &mut App) {
-    let tab = app.state.settings.active;
+    let tab = active_tab(app);
     let form = match tab {
         TAB_APPEARANCE => appearance(app),
         TAB_DISPLAY => display(app),
@@ -376,14 +413,23 @@ fn display(app: &App) -> Form {
             "Outputs",
             items,
             None,
-            if app.hypr.is_some() {
-                "no monitors reported"
-            } else {
-                "Hyprland not connected"
-            },
+            "no monitors reported",
         )],
     );
-    if let Some(m) = mons.get(s.monitor) {
+    let wm_caps = app.wm.capabilities();
+    if !wm_caps.monitors {
+        form = form.section(
+            "Configure",
+            vec![note(
+                0,
+                &format!(
+                    "Output modes are set by {} at start; changing them here needs Hyprland.",
+                    app.wm.state().name
+                ),
+            )],
+        );
+    }
+    if let Some(m) = mons.get(s.monitor).filter(|_| wm_caps.monitors) {
         let mut modes = vec!["preferred".to_string(), "highrr".into(), "highres".into()];
         modes.extend(m.available_modes.iter().cloned());
         form = form.section(
@@ -397,6 +443,9 @@ fn display(app: &App) -> Form {
                 button(id::MON_APPLY, "Apply and save", "APPLY"),
             ],
         );
+    }
+    if app.wm.kind() != wm::WmKind::Hyprland {
+        return form;
     }
     form.section(
         "Night light",
@@ -514,39 +563,64 @@ fn audio(app: &App) -> Form {
             )
         })
         .collect();
-    Form::default()
-        .section(
-            "Output",
-            vec![
-                slider(id::VOLUME, "Volume", a.volume as f32, 0.0, 150.0, 5.0, "%"),
-                toggle(id::MUTE, "Mute", a.muted),
-                list(
-                    id::SINKS,
-                    "Output devices",
-                    sinks,
-                    Some("USE"),
-                    if a.available {
-                        "no sinks"
-                    } else {
-                        "PipeWire not running"
-                    },
-                ),
-            ],
-        )
-        .section(
-            "Input",
-            vec![
-                toggle(id::MIC_MUTE, "Mute microphone", a.mic_muted),
-                list(
-                    id::SOURCES,
-                    "Input devices",
-                    sources,
-                    Some("USE"),
-                    "no sources",
-                ),
-                button(id::MIXER, "Advanced", "OPEN MIXER"),
-            ],
-        )
+    let caps = &app.caps;
+    let max = if caps.os == system::Os::Linux {
+        150.0
+    } else {
+        100.0
+    };
+    let mut output = vec![
+        slider(id::VOLUME, "Volume", a.volume as f32, 0.0, max, 5.0, "%"),
+        toggle(id::MUTE, "Mute", a.muted),
+    ];
+    if caps.audio_devices {
+        output.push(list(
+            id::SINKS,
+            "Output devices",
+            sinks,
+            Some("USE"),
+            if a.available {
+                "no sinks"
+            } else {
+                "PipeWire not running"
+            },
+        ));
+    } else {
+        let card = a.sinks.iter().find(|d| d.default).map(|d| d.name.clone());
+        output.push(info(
+            0,
+            "Sound card",
+            card.unwrap_or_else(|| {
+                if a.available {
+                    "OSS mixer".into()
+                } else {
+                    "no sound card".into()
+                }
+            }),
+        ));
+    }
+    let mut input = Vec::new();
+    if caps.microphone {
+        input.push(toggle(id::MIC_MUTE, "Mute microphone", a.mic_muted));
+    }
+    if caps.audio_devices {
+        input.push(list(
+            id::SOURCES,
+            "Input devices",
+            sources,
+            Some("USE"),
+            "no sources",
+        ));
+    }
+    if caps.audio_mixer_app {
+        input.push(button(id::MIXER, "Advanced", "OPEN MIXER"));
+    }
+    let form = Form::default().section("Output", output);
+    if input.is_empty() {
+        form
+    } else {
+        form.section("Input", input)
+    }
 }
 
 fn network(app: &App) -> Form {
@@ -584,35 +658,43 @@ fn network(app: &App) -> Form {
             )
         })
         .collect();
-    Form::default()
+    let caps = &app.caps;
+    let mut wifi = Vec::new();
+    if caps.wifi_radio {
+        wifi.push(toggle(id::WIFI, "Wi-Fi", n.wifi_enabled));
+    }
+    if caps.airplane {
+        wifi.push(toggle(
+            id::AIRPLANE,
+            "Airplane mode",
+            !n.wifi_enabled && !n.available,
+        ));
+    }
+    let form = Form::default()
         .section(
             "Wi-Fi",
-            vec![
-                toggle(id::WIFI, "Wi-Fi", n.wifi_enabled),
-                toggle(
-                    id::AIRPLANE,
-                    "Airplane mode",
-                    !n.wifi_enabled && !n.available,
-                ),
-                button(id::RESCAN, "Networks", "RESCAN"),
-                list(
-                    id::NETWORKS,
-                    "Available networks",
-                    nets,
-                    Some("CONNECT"),
-                    if n.wifi_hardware {
-                        "no networks found"
-                    } else {
-                        "no Wi-Fi hardware"
-                    },
-                ),
-                secret(
-                    id::PASSWORD,
-                    "Password for new networks",
-                    &s.wifi_password,
-                    "leave empty for saved/open networks",
-                ),
-            ],
+            wifi.into_iter()
+                .chain([
+                    button(id::RESCAN, "Networks", "RESCAN"),
+                    list(
+                        id::NETWORKS,
+                        "Available networks",
+                        nets,
+                        Some("CONNECT"),
+                        if n.wifi_hardware {
+                            "no networks found"
+                        } else {
+                            "no Wi-Fi hardware"
+                        },
+                    ),
+                    secret(
+                        id::PASSWORD,
+                        "Password for new networks",
+                        &s.wifi_password,
+                        "leave empty for saved/open networks",
+                    ),
+                ])
+                .collect(),
         )
         .section(
             "Connections",
@@ -639,23 +721,26 @@ fn network(app: &App) -> Form {
                 ),
                 button(id::CONN_DELETE, "Selected connection", "DELETE"),
             ],
-        )
-        .section(
-            "VPN",
-            vec![
-                text(
-                    id::VPN_PATH,
-                    "Import file",
-                    &s.vpn_path,
-                    "/path/to/config.ovpn or .conf",
-                ),
-                button(id::VPN_IMPORT, "Import OpenVPN / WireGuard", "IMPORT"),
-                note(
-                    0,
-                    "Imported VPNs are managed from the Privacy panel (SUPER+P).",
-                ),
-            ],
-        )
+        );
+    if !caps.vpn {
+        return form;
+    }
+    form.section(
+        "VPN",
+        vec![
+            text(
+                id::VPN_PATH,
+                "Import file",
+                &s.vpn_path,
+                "/path/to/config.ovpn or .conf",
+            ),
+            button(id::VPN_IMPORT, "Import OpenVPN / WireGuard", "IMPORT"),
+            note(
+                0,
+                "Imported VPNs are managed from the Privacy panel (SUPER+P).",
+            ),
+        ],
+    )
 }
 
 fn bluetooth(app: &App) -> Form {
@@ -753,55 +838,70 @@ fn power(app: &App) -> Form {
             "%",
         ));
     }
-    ctrls.push(choice_owned(id::PROFILE, "Power profile", profiles, psel));
-    Form::default().section("Power", ctrls).section(
-        "Idle",
-        vec![
-            slider(
-                id::DIM,
-                &format!("Dim screen after ({})", secs(c.power.dim_after)),
-                c.power.dim_after as f32,
-                0.0,
-                3600.0,
-                30.0,
-                " s",
-            ),
-            slider(
-                id::LOCK,
-                &format!("Lock after ({})", secs(c.power.lock_after)),
-                c.power.lock_after as f32,
-                0.0,
-                3600.0,
-                30.0,
-                " s",
-            ),
-            slider(
-                id::DPMS,
-                &format!("Screen off after ({})", secs(c.power.dpms_after)),
-                c.power.dpms_after as f32,
-                0.0,
-                3600.0,
-                30.0,
-                " s",
-            ),
-            slider(
-                id::SUSPEND,
-                &format!("Suspend after ({})", secs(c.power.suspend_after)),
-                c.power.suspend_after as f32,
-                0.0,
-                7200.0,
-                60.0,
-                " s",
-            ),
-            toggle(id::LOCK_SLEEP, "Lock before sleep", c.power.lock_on_sleep),
-            choice(
-                id::LID,
-                "Lid close action",
-                &LID,
-                index_of(&LID, &c.power.lid_close),
-            ),
-        ],
-    )
+    let caps = &app.caps;
+    if caps.power_profiles {
+        ctrls.push(choice_owned(id::PROFILE, "Power profile", profiles, psel));
+    }
+    let form = Form::default().section("Power", ctrls);
+    if !caps.idle {
+        return form;
+    }
+    let mut idle = vec![
+        slider(
+            id::DIM,
+            &format!("Dim screen after ({})", secs(c.power.dim_after)),
+            c.power.dim_after as f32,
+            0.0,
+            3600.0,
+            30.0,
+            " s",
+        ),
+        slider(
+            id::LOCK,
+            &format!("Lock after ({})", secs(c.power.lock_after)),
+            c.power.lock_after as f32,
+            0.0,
+            3600.0,
+            30.0,
+            " s",
+        ),
+        slider(
+            id::DPMS,
+            &format!("Screen off after ({})", secs(c.power.dpms_after)),
+            c.power.dpms_after as f32,
+            0.0,
+            3600.0,
+            30.0,
+            " s",
+        ),
+    ];
+    if caps.suspend {
+        idle.push(slider(
+            id::SUSPEND,
+            &format!("Suspend after ({})", secs(c.power.suspend_after)),
+            c.power.suspend_after as f32,
+            0.0,
+            7200.0,
+            60.0,
+            " s",
+        ));
+    }
+    if caps.lock {
+        idle.push(toggle(
+            id::LOCK_SLEEP,
+            "Lock before sleep",
+            c.power.lock_on_sleep,
+        ));
+    }
+    if caps.lid_action {
+        idle.push(choice(
+            id::LID,
+            "Lid close action",
+            &LID,
+            index_of(&LID, &c.power.lid_close),
+        ));
+    }
+    form.section("Idle", idle)
 }
 
 fn security(app: &App) -> Form {
@@ -845,16 +945,40 @@ fn security(app: &App) -> Form {
         fp.insert(4, info(id::FP_PROGRESS, "Enrolment", p.clone()));
     }
     let keyring = app.sysmon.process_running("gnome-keyring-d");
-    Form::default()
-        .section("Screen lock", vec![
+    let caps = &app.caps;
+    let mut form = Form::default();
+    if caps.lock {
+        form = form.section("Screen lock", vec![
             button(id::LOCK_NOW, "hyprlock", "LOCK NOW"),
             note(0, "Lock timing lives under Power → Idle; the lock screen uses the eDEX theme from /usr/share/edex-de/hypr/hyprlock.conf."),
-        ])
-        .section("Fingerprint", fp)
-        .section("System", vec![
-            info(id::FIREWALL, "Firewall (nftables)", if app.sys.privacy.firewall_active { "active" } else { "inactive" }),
-            info(id::KEYRING, "Keyring daemon", if keyring { "running" } else { "not running" }),
-        ])
+        ]);
+    }
+    if caps.fingerprint {
+        form = form.section("Fingerprint", fp);
+    }
+    let mut system = Vec::new();
+    if caps.firewall {
+        system.push(info(
+            id::FIREWALL,
+            "Firewall (nftables)",
+            if app.sys.privacy.firewall_active {
+                "active"
+            } else {
+                "inactive"
+            },
+        ));
+    }
+    if caps.keyring {
+        system.push(info(
+            id::KEYRING,
+            "Keyring daemon",
+            if keyring { "running" } else { "not running" },
+        ));
+    }
+    if !system.is_empty() {
+        form = form.section("System", system);
+    }
+    form
 }
 
 fn users(app: &App) -> Form {
@@ -880,33 +1004,42 @@ fn users(app: &App) -> Form {
         })
         .collect();
     let selected = app.sys.users.get(cur);
-    Form::default()
-        .section(
-            "Accounts",
-            vec![list(id::USERS, "Users", items, None, "no users")],
-        )
-        .section(
+    let form = Form::default().section(
+        "Accounts",
+        vec![list(id::USERS, "Users", items, None, "no users")],
+    );
+    if !app.caps.user_edit {
+        return form.section(
             format!("Edit {}", selected.map(|u| u.name.as_str()).unwrap_or("-")),
-            vec![
-                text(
-                    id::REAL_NAME,
-                    "Full name",
-                    &s.real_name,
-                    selected.map(|u| u.real_name.as_str()).unwrap_or(""),
-                ),
-                button(id::SET_NAME, "Full name", "SAVE"),
-                button(id::PASSWD, "Password (opens in a terminal tab)", "CHANGE"),
-                button(
-                    id::LOCK_USER,
-                    if selected.is_some_and(|u| u.locked) {
-                        "Unlock account"
-                    } else {
-                        "Lock account"
-                    },
-                    "TOGGLE",
-                ),
-            ],
-        )
+            vec![button(
+                id::PASSWD,
+                "Password (opens in a terminal tab)",
+                "CHANGE",
+            )],
+        );
+    }
+    form.section(
+        format!("Edit {}", selected.map(|u| u.name.as_str()).unwrap_or("-")),
+        vec![
+            text(
+                id::REAL_NAME,
+                "Full name",
+                &s.real_name,
+                selected.map(|u| u.real_name.as_str()).unwrap_or(""),
+            ),
+            button(id::SET_NAME, "Full name", "SAVE"),
+            button(id::PASSWD, "Password (opens in a terminal tab)", "CHANGE"),
+            button(
+                id::LOCK_USER,
+                if selected.is_some_and(|u| u.locked) {
+                    "Unlock account"
+                } else {
+                    "Lock account"
+                },
+                "TOGGLE",
+            ),
+        ],
+    )
 }
 
 const POSITIONS: [&str; 4] = ["top-right", "top-left", "bottom-right", "bottom-left"];
@@ -1000,21 +1133,51 @@ fn services(app: &App) -> Form {
             )
         })
         .collect();
+    let caps = &app.caps;
+    let mut ctrls = Vec::new();
+    if caps.user_services {
+        ctrls.push(choice(
+            id::SCOPE,
+            "Scope",
+            &["system", "user"],
+            if s.services_user { 1 } else { 0 },
+        ));
+    }
+    ctrls.push(text(
+        id::FILTER,
+        "Filter",
+        &s.service_filter,
+        "type to filter",
+    ));
+    ctrls.push(list(
+        id::UNITS,
+        if caps.os == system::Os::RustOs {
+            "Started at boot"
+        } else {
+            "Units"
+        },
+        items,
+        Some("START/STOP"),
+        "no units",
+    ));
+    if caps.service_enable {
+        ctrls.push(button(id::ENABLE, "Selected unit", "ENABLE"));
+        ctrls.push(button(id::DISABLE, "Selected unit", "DISABLE"));
+    }
+    ctrls.push(button(id::RESTART, "Selected unit", "RESTART"));
+    if caps.os == system::Os::RustOs {
+        ctrls.push(note(
+            0,
+            "RustOS starts these from /etc/rc; add your own to /storage/etc/rc.local.",
+        ));
+    }
     Form::default().section(
-        "systemd",
-        vec![
-            choice(
-                id::SCOPE,
-                "Scope",
-                &["system", "user"],
-                if s.services_user { 1 } else { 0 },
-            ),
-            text(id::FILTER, "Filter", &s.service_filter, "type to filter"),
-            list(id::UNITS, "Units", items, Some("START/STOP"), "no units"),
-            button(id::ENABLE, "Selected unit", "ENABLE"),
-            button(id::DISABLE, "Selected unit", "DISABLE"),
-            button(id::RESTART, "Selected unit", "RESTART"),
-        ],
+        if caps.os == system::Os::RustOs {
+            "/etc/rc"
+        } else {
+            "systemd"
+        },
+        ctrls,
     )
 }
 
@@ -1023,8 +1186,8 @@ const LAYOUTS: [&str; 3] = ["dwindle", "master", "scrolling"];
 fn wm(app: &App) -> Form {
     let c = &app.config.wm;
     let binds = app
-        .hypr
-        .as_ref()
+        .wm
+        .hypr_socket()
         .and_then(|h| h.binds().ok())
         .map(|b| {
             let mut lines: Vec<String> = b
@@ -1046,71 +1209,100 @@ fn wm(app: &App) -> Form {
             }
             lines.join("\n")
         })
-        .unwrap_or_else(|| "Hyprland not connected".into());
+        .unwrap_or_else(|| match app.wm.kind() {
+            wm::WmKind::Labwc => settings::labwc_export::bind_lines(&app.config).join("\n"),
+            _ => "Hyprland not connected".into(),
+        });
+    let caps = app.wm.capabilities();
+    let mut ctrls = Vec::new();
+    if caps.gaps_inner {
+        ctrls.push(slider(
+            id::GAPS_IN,
+            "Inner gaps",
+            c.gaps_in as f32,
+            0.0,
+            64.0,
+            1.0,
+            " px",
+        ));
+    }
+    if caps.gaps_outer {
+        ctrls.push(slider(
+            id::GAPS_OUT,
+            "Outer gaps",
+            c.gaps_out as f32,
+            0.0,
+            128.0,
+            1.0,
+            " px",
+        ));
+    }
+    if caps.border {
+        ctrls.push(slider(
+            id::BORDER,
+            "Border width",
+            c.border as f32,
+            0.0,
+            10.0,
+            1.0,
+            " px",
+        ));
+    }
+    if caps.rounding {
+        ctrls.push(slider(
+            id::ROUNDING,
+            "Corner rounding",
+            c.rounding as f32,
+            0.0,
+            30.0,
+            1.0,
+            " px",
+        ));
+    }
+    if caps.layout {
+        ctrls.push(choice(
+            id::LAYOUT,
+            "Layout",
+            &LAYOUTS,
+            index_of(&LAYOUTS, &c.layout),
+        ));
+    }
+    if caps.workspaces {
+        ctrls.push(slider(
+            id::WORKSPACES,
+            "Workspaces",
+            c.workspaces as f32,
+            1.0,
+            10.0,
+            1.0,
+            "",
+        ));
+    }
+    if caps.animations {
+        ctrls.push(toggle(id::WM_ANIM, "Window animations", c.animations));
+    }
+    if caps.blur {
+        ctrls.push(toggle(id::BLUR, "Blur", c.blur));
+    }
+    let wm_name = match app.wm.kind() {
+        wm::WmKind::Hyprland => "Hyprland",
+        wm::WmKind::Labwc => "labwc",
+        wm::WmKind::None => "",
+    };
+    if wm_name.is_empty() {
+        ctrls.push(note(
+            0,
+            "No window manager connected: these settings apply under Hyprland or labwc.",
+        ));
+    } else {
+        ctrls.push(button(
+            id::RELOAD,
+            &format!("Regenerate and reload the {wm_name} config"),
+            "RELOAD",
+        ));
+    }
     Form::default()
-        .section(
-            "Tiling",
-            vec![
-                slider(
-                    id::GAPS_IN,
-                    "Inner gaps",
-                    c.gaps_in as f32,
-                    0.0,
-                    64.0,
-                    1.0,
-                    " px",
-                ),
-                slider(
-                    id::GAPS_OUT,
-                    "Outer gaps",
-                    c.gaps_out as f32,
-                    0.0,
-                    128.0,
-                    1.0,
-                    " px",
-                ),
-                slider(
-                    id::BORDER,
-                    "Border width",
-                    c.border as f32,
-                    0.0,
-                    10.0,
-                    1.0,
-                    " px",
-                ),
-                slider(
-                    id::ROUNDING,
-                    "Corner rounding",
-                    c.rounding as f32,
-                    0.0,
-                    30.0,
-                    1.0,
-                    " px",
-                ),
-                choice(
-                    id::LAYOUT,
-                    "Layout",
-                    &LAYOUTS,
-                    index_of(&LAYOUTS, &c.layout),
-                ),
-                slider(
-                    id::WORKSPACES,
-                    "Workspaces",
-                    c.workspaces as f32,
-                    1.0,
-                    10.0,
-                    1.0,
-                    "",
-                ),
-                toggle(id::WM_ANIM, "Window animations", c.animations),
-                toggle(id::BLUR, "Blur", c.blur),
-                button(
-                    id::RELOAD,
-                    "Regenerate and reload Hyprland config",
-                    "RELOAD",
-                ),
-            ],
-        )
+        .section(if caps.layout { "Tiling" } else { "Windows" }, ctrls)
         .section("Key bindings", vec![note(id::BINDS, &binds)])
 }
 
@@ -1200,7 +1392,7 @@ fn about(app: &App) -> Form {
                 "Memory",
                 format!("{:.1} GiB", a.ram_total_kb as f64 / 1_048_576.0),
             ),
-            info(0, "Hyprland", a.hyprland_version.clone()),
+            info(0, "Window manager", a.hyprland_version.clone()),
             info(0, "eDEX-DE", a.edex_version.clone()),
             info(
                 0,
@@ -1590,7 +1782,8 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         if id == id::THEME || id == id::FONT || id == id::FONT_SIZE || id == id::TERM_FONT {
             app.relayout(platform);
         }
-        if hypr && (id::KB_LAYOUT..=id::SENS).contains(&id) {
+        if hypr && app.wm.kind() == wm::WmKind::Hyprland && (id::KB_LAYOUT..=id::SENS).contains(&id)
+        {
             let c = &app.config.input;
             app.system.send(SysRequest::ApplyInput {
                 kb_layout: c.kb_layout.clone(),
@@ -1719,8 +1912,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             }
         }
         id::MIXER => {
-            let _ =
-                launcher::runner::spawn_detached("pavucontrol || pwvucontrol", app.hypr.is_some());
+            app.spawn("pavucontrol || pwvucontrol");
         }
         // Network
         id::WIFI => {
@@ -1841,7 +2033,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
         }
         // Security
         id::LOCK_NOW => {
-            let _ = launcher::runner::spawn_detached("hyprlock", app.hypr.is_some());
+            app.spawn("hyprlock");
         }
         id::FP_FINGER => {
             if let Some(i) = f_idx(&ch) {
@@ -1985,7 +2177,7 @@ pub fn on_change(app: &mut App, platform: &mut Platform<AppEvent>, id: u32, ch: 
             }
         }
         // WM
-        id::RELOAD => app.export_hypr(),
+        id::RELOAD => app.export_wm(),
         _ => {}
     }
 }

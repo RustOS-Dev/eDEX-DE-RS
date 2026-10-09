@@ -62,10 +62,8 @@ impl Default for RealRunner {
 
 impl RealRunner {
     fn execute(&self, program: &str, args: &[&str], stdin: Option<&str>) -> Result<Output> {
-        let mut cmd = Command::new("timeout");
-        cmd.arg(format!("{}", self.timeout.as_secs()))
-            .arg(program)
-            .args(args);
+        let mut cmd = Command::new(program);
+        cmd.args(args);
         cmd.stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -81,11 +79,35 @@ impl RealRunner {
             use std::io::Write;
             let _ = pipe.write_all(data.as_bytes());
         }
-        let out = child.wait_with_output()?;
+        // Read both pipes on threads so a full pipe never blocks the child, and give up
+        // (killing it) after the timeout.
+        let read = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut p) = pipe {
+                    let _ = p.read_to_end(&mut buf);
+                }
+                buf
+            })
+        };
+        let out = read(child.stdout.take().map(|p| Box::new(p) as _));
+        let err = read(child.stderr.take().map(|p| Box::new(p) as _));
+        let deadline = std::time::Instant::now() + self.timeout;
+        let status = loop {
+            match child.try_wait()? {
+                Some(st) => break st.code().unwrap_or(-1),
+                None if std::time::Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break 124;
+                }
+                None => std::thread::sleep(Duration::from_millis(10)),
+            }
+        };
         Ok(Output {
-            status: out.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            status,
+            stdout: String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned(),
+            stderr: String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned(),
         })
     }
 }

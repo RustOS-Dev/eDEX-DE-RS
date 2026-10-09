@@ -205,25 +205,24 @@ pub enum WindowAction {
     Close,
 }
 
-/// Apply a window control through Hyprland; the resulting events refresh the tab strip.
+/// Apply a window control through the window manager; the resulting events refresh the tab
+/// strip.
 pub fn window_action(app: &mut App, address: &str, action: WindowAction) {
-    let Some(h) = &app.hypr else {
-        return;
-    };
+    let wm = &mut app.wm;
     let result = match action {
-        WindowAction::Focus => h.focus_window(address),
-        WindowAction::Minimize => h.minimize_window(address),
-        WindowAction::Restore => match app.hypr_state.active_workspace_of(None) {
-            Some(ws) => h.restore_window(address, ws),
-            None => Ok(()),
-        },
-        WindowAction::ToggleMaximize => h
-            .focus_window(address)
-            .and_then(|_| h.toggle_maximized(address)),
-        WindowAction::Close => h.close_window(address),
+        WindowAction::Focus => wm.focus_window(address),
+        WindowAction::Minimize => wm.minimize(address),
+        WindowAction::Restore => wm.restore(address),
+        WindowAction::ToggleMaximize => wm.toggle_maximize(address),
+        WindowAction::Close => wm.close(address),
     };
     if let Err(e) = result {
         tracing::warn!("window {action:?} {address}: {e:#}");
+    }
+    // Backends whose state changes without an event from the compositor (labwc's maximize)
+    // are picked up on the next loop iteration.
+    if let Ok(tx) = app.tx.lock() {
+        let _ = tx.send(AppEvent::WmReadable);
     }
 }
 
@@ -614,14 +613,12 @@ fn canvas_click(
             }
         }
         HitTarget::Workspace(id) => {
-            if let Some(h) = &app.hypr {
-                if let Err(e) = h.focus_workspace(id as i32) {
-                    tracing::warn!("workspace switch: {e:#}");
-                }
+            if let Err(e) = app.wm.focus_workspace(id as i32) {
+                tracing::warn!("workspace switch: {e:#}");
             }
         }
         HitTarget::Install => {
-            let _ = launcher::runner::spawn_detached("edex-install", true);
+            app.spawn("edex-install");
         }
         HitTarget::Launcher => app.open_overlay(platform, OverlayKind::Launcher),
         HitTarget::Clock => app.open_overlay(platform, OverlayKind::Power),
@@ -643,16 +640,16 @@ fn status_click(app: &mut App, platform: &mut Platform<AppEvent>, item: StatusIt
                 crate::status::audio_request(app, system::SysRequest::AudioToggleMute);
             } else {
                 app.open_overlay(platform, OverlayKind::Settings);
-                crate::forms::settings::select_tab(app, crate::forms::settings::TAB_AUDIO);
+                crate::forms::settings::show_tab(app, crate::forms::settings::TAB_AUDIO);
             }
         }
         StatusItem::Battery => {
             app.open_overlay(platform, OverlayKind::Settings);
-            crate::forms::settings::select_tab(app, crate::forms::settings::TAB_POWER);
+            crate::forms::settings::show_tab(app, crate::forms::settings::TAB_POWER);
         }
         StatusItem::Network => {
             app.open_overlay(platform, OverlayKind::Settings);
-            crate::forms::settings::select_tab(app, crate::forms::settings::TAB_NETWORK);
+            crate::forms::settings::show_tab(app, crate::forms::settings::TAB_NETWORK);
         }
         StatusItem::Notifications => {
             if btn == button::RIGHT {
@@ -680,7 +677,7 @@ fn status_click(app: &mut App, platform: &mut Platform<AppEvent>, item: StatusIt
                 }
                 _ => crate::forms::privacy::TAB_TOR,
             };
-            crate::forms::privacy::select_tab(app, tab);
+            crate::forms::privacy::show_tab(app, tab);
         }
     }
 }

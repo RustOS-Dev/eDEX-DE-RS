@@ -15,7 +15,6 @@ use calloop::{
     timer::{TimeoutAction, Timer},
     EventLoop, Interest, Mode,
 };
-use hypr::{events::EventStream, HyprSocket, HyprState};
 use ipc::IpcServer;
 use launcher::{AppEntry, AppSearch, LaunchHistory};
 use notifications::{server::ServerEvent, NotificationServer, NotificationStore};
@@ -36,12 +35,14 @@ use ui::{
     theme::{builtin_tron, load_themes},
     ShellState, Theme,
 };
+use wm::{WindowManager, WmChoice};
 
 use crate::events::{AppEvent, Tick};
 
 pub struct RunOptions {
     pub config_path: PathBuf,
-    pub no_hypr: bool,
+    /// Window manager backend (`--wm`).
+    pub wm: WmChoice,
     pub smoke: Option<Duration>,
 }
 
@@ -94,9 +95,8 @@ pub struct App {
     pub outputs: Vec<OutputShell>,
     pub state: ShellState,
     pub terminal: TerminalTabs,
-    pub hypr: Option<HyprSocket>,
-    pub hypr_events: Option<EventStream>,
-    pub hypr_state: HyprState,
+    /// The window manager: tab strip, workspaces, launching, logout, config export.
+    pub wm: Box<dyn WindowManager>,
     /// Whether each output's side panels are currently reserved (by output name).
     pub applied_sides: HashMap<String, bool>,
     pub ipc: Option<IpcServer>,
@@ -106,6 +106,8 @@ pub struct App {
     pub sysmon: SysmonCollector,
     pub privacy_probe: PrivacyProbe,
     pub system: SystemBackend,
+    /// What this system's backends can do (rows without one are hidden).
+    pub caps: system::Capabilities,
     pub sys: SysCache,
     pub apps: Vec<AppEntry>,
     pub search: AppSearch,
@@ -186,12 +188,13 @@ impl App {
         )
         .context("terminal setup")?;
 
-        // Hyprland
-        let (hypr, hypr_events, hypr_state) = if opts.no_hypr {
-            (None, None, HyprState::unavailable())
-        } else {
-            connect_hypr(platform)
-        };
+        // Window manager
+        let wm = wm::connect(opts.wm, platform);
+        if let Some(fd) = wm.event_fd() {
+            if let Err(e) = register_readable(platform, &fd, AppEvent::WmReadable) {
+                warn!("window manager events not registered: {e:#}");
+            }
+        }
 
         // IPC
         let ipc = match IpcServer::bind(ipc::socket_path()) {
@@ -219,7 +222,9 @@ impl App {
         let notif_server = match NotificationServer::start(notif_sink) {
             Ok(s) => Some(s),
             Err(e) => {
-                warn!("notification server not started: {e:#}");
+                // D-Bus is optional: without a session bus the shell runs without the
+                // org.freedesktop.Notifications server (`edex-de ipc notify` still works).
+                warn!("notification server not started (no D-Bus session bus?): {e:#}");
                 None
             }
         };
@@ -261,9 +266,7 @@ impl App {
             outputs: Vec::new(),
             state,
             terminal,
-            hypr,
-            hypr_events,
-            hypr_state,
+            wm,
             applied_sides: HashMap::new(),
             ipc,
             notif_server,
@@ -272,6 +275,7 @@ impl App {
             sysmon,
             privacy_probe: PrivacyProbe::new(5),
             system,
+            caps: system::Capabilities::current(),
             sys: SysCache {
                 // Known before the first (slower) privacy query returns, so the panel never
                 // claims Tor or Tailscale are missing while it is still loading.
@@ -300,7 +304,7 @@ impl App {
             pscratch: Default::default(),
         };
         app.apply_config_to_state();
-        app.update_hypr_view();
+        app.update_wm_view();
         crate::status::refresh_sysinfo(&mut app);
         crate::status::refresh_privacy(&mut app);
         app.tick_clock();
@@ -443,7 +447,7 @@ impl App {
     /// Side panels keep their space unless the user hid them or a maximized window on this
     /// output's workspace wants the full width.
     pub fn reserve_sides_on(&self, output: &str) -> bool {
-        self.config.layout.reserve_side_panels && !self.hypr_state.maximized_on(output)
+        self.config.layout.reserve_side_panels && !self.wm.state().maximized_on(output)
     }
 
     pub fn primary(&self) -> Option<&OutputShell> {
@@ -502,7 +506,7 @@ impl App {
                     .resize(cols, rows, metrics.cell_w, metrics.cell_h);
             }
         }
-        self.update_hypr_view();
+        self.update_wm_view();
         self.sync_strip_surfaces(platform);
     }
 
@@ -812,15 +816,18 @@ impl App {
     }
 
     /// Move keyboard focus to the shell canvas (from an app window or at login). Apps tile over
-    /// the terminal, so when this workspace has windows switch to an empty one first, where the
-    /// terminal is visible (SUPER+1..9 goes back).
+    /// the terminal: on Hyprland switch to an empty workspace first, where the terminal is
+    /// visible (SUPER+1..9 goes back); elsewhere minimize the covering windows into tabs.
     pub fn focus_shell(&mut self, platform: &mut Platform<AppEvent>) {
-        if let Some(h) = &self.hypr {
-            if h.active_workspace_windows().unwrap_or(0) > 0 {
-                if let Err(e) = h.focus_empty_workspace() {
-                    warn!("switching to an empty workspace: {e:#}");
+        match self.wm.reveal_shell() {
+            Ok(true) => {}
+            Ok(false) => {
+                if self.state.apps_cover_terminal {
+                    self.bring_terminal_forward(platform);
+                    return;
                 }
             }
+            Err(e) => warn!("revealing the shell: {e:#}"),
         }
         if let Some(canvas) = self.primary().map(|s| s.canvas) {
             if self.focus_surface != Some(canvas) {
@@ -924,8 +931,8 @@ impl App {
         self.state.status.dnd = self.store.dnd;
     }
 
-    /// Persist the config, apply it to the shell and export the Hyprland side.
-    pub fn commit_config(&mut self, platform: &mut Platform<AppEvent>, export_hypr: bool) {
+    /// Persist the config, apply it to the shell and export the window manager's side.
+    pub fn commit_config(&mut self, platform: &mut Platform<AppEvent>, export_wm: bool) {
         self.config.sanitize();
         if let Err(e) = settings::save(&self.opts.config_path, &self.config) {
             warn!("cannot save config: {e:#}");
@@ -933,23 +940,34 @@ impl App {
         }
         self.apply_config_to_state();
         self.relayout(platform);
-        if export_hypr {
-            self.export_hypr();
+        if export_wm {
+            self.export_wm();
         }
         self.mark_all_dirty();
     }
 
-    pub fn export_hypr(&mut self) {
-        let dir = settings::paths::hypr_config_dir();
-        match settings::hypr_export::export(&self.config, &dir, "hyprlock") {
+    /// Write the window manager's configuration (Hyprland Lua, labwc rc.xml) and reload it.
+    pub fn export_wm(&mut self) {
+        match self.wm.export(&self.config) {
             Ok(()) => {
-                if let Some(h) = &self.hypr {
-                    if let Err(e) = h.reload() {
-                        warn!("hyprctl reload failed: {e:#}");
-                    }
+                if let Err(e) = self.wm.reload() {
+                    warn!("{} reload failed: {e:#}", self.wm.kind().name());
                 }
             }
-            Err(e) => warn!("cannot export Hyprland config: {e:#}"),
+            Err(e) => warn!("cannot export the {} config: {e:#}", self.wm.kind().name()),
+        }
+    }
+
+    /// Run a shell command detached, through the window manager when it can (so it opens on
+    /// the current workspace).
+    pub fn spawn(&self, cmd: &str) {
+        match self.wm.exec(cmd) {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(e) => warn!("launching through the window manager failed: {e:#}"),
+        }
+        if let Err(e) = launcher::runner::spawn_detached(cmd) {
+            warn!("cannot start `{cmd}`: {e:#}");
         }
     }
 
@@ -977,61 +995,40 @@ impl App {
         true
     }
 
-    // ─── Hyprland view ──────────────────────────────────────────────────────
+    // ─── Window manager view ────────────────────────────────────────────────
 
-    pub fn update_hypr_view(&mut self) {
-        self.state.hypr_connected = self.hypr_state.connected;
-        self.state.workspaces = self.hypr_state.workspace_strip(None);
-        self.state.active_window = self
-            .hypr_state
-            .active_window
-            .as_ref()
-            .map(|(_, t)| t.clone());
-        self.state.windows = self.hypr_state.window_tabs();
+    pub fn update_wm_view(&mut self) {
+        let names: Vec<String> = self.outputs.iter().map(|o| o.name.clone()).collect();
+        self.wm.set_outputs(&names);
+        let st = self.wm.state();
+        self.state.hypr_connected = st.connected && self.wm.supports_workspaces();
+        self.state.workspaces = st.workspace_strip(None);
+        self.state.active_window = st.active_window.as_ref().map(|(_, t)| t.clone());
+        self.state.windows = st.window_tabs();
         let primary = self.primary().map(|o| o.name.clone()).unwrap_or_default();
-        let tiled = self.hypr_state.tiled_on(&primary);
+        let tiled = st.tiled_on(&primary);
         self.state.apps_cover_terminal = tiled;
-        self.state.wide_tab_strip = tiled && !self.reserve_sides_on(&primary);
-        if self.hypr_state.connected {
-            self.state.kb_layout = self.hypr_state.short_layout();
+        self.state.kb_layout = if st.connected && !st.keyboard_layout.is_empty() {
+            st.short_layout()
         } else {
-            self.state.kb_layout = self.config.input.kb_layout.clone();
-        }
+            self.config.input.kb_layout.clone()
+        };
+        self.state.wide_tab_strip = tiled && !self.reserve_sides_on(&primary);
         self.mark_canvas_dirty();
     }
 
-    pub fn drain_hypr(&mut self, platform: &mut Platform<AppEvent>) {
-        let Some(stream) = self.hypr_events.as_mut() else {
-            return;
-        };
-        let mut events = Vec::new();
-        match stream.drain(&mut events) {
-            Ok(true) => {}
-            Ok(false) => {
-                warn!("Hyprland event socket closed");
-                self.hypr_events = None;
-                self.hypr_state.connected = false;
-            }
-            Err(e) => {
-                warn!("Hyprland events: {e:#}");
-            }
+    /// The window manager has news (its event socket is readable, or the compositor's window
+    /// list changed).
+    pub fn drain_wm(&mut self, platform: &mut Platform<AppEvent>) {
+        let update = self.wm.refresh();
+        if update.lost {
+            warn!("lost the connection to the window manager");
         }
-        let mut resync = false;
-        for ev in &events {
-            if self.hypr_state.apply(ev) {
-                resync = true;
-            }
-            if let hypr::HyprEvent::Bell(_) = ev {
-                self.state.terminal.frame.bell = true;
-            }
+        if update.bell {
+            self.state.terminal.frame.bell = true;
         }
-        if resync {
-            if let Some(sock) = &self.hypr {
-                self.hypr_state.resync(sock);
-            }
-        }
-        if !events.is_empty() {
-            self.update_hypr_view();
+        if update.changed {
+            self.update_wm_view();
             // A window was maximized or restored: give it (or take back) the side panels' space.
             let changed = self
                 .outputs
@@ -1154,6 +1151,7 @@ impl App {
                 }
             }
             PlatformEvent::OutputRemoved(id) => self.remove_output(platform, id),
+            PlatformEvent::ToplevelsChanged => self.drain_wm(platform),
             PlatformEvent::Configure {
                 surface,
                 width,
@@ -1302,7 +1300,7 @@ impl App {
             }
             AppEvent::Notify(ev) => crate::status::notification_event(self, platform, ev),
             AppEvent::Sys(reply) => crate::status::system_reply(self, platform, reply),
-            AppEvent::HyprReadable => self.drain_hypr(platform),
+            AppEvent::WmReadable => self.drain_wm(platform),
             AppEvent::IpcReadable => crate::ipc_handler::drain(self, platform),
             AppEvent::Tick(t) => self.handle_tick(platform, t),
         }
@@ -1316,10 +1314,9 @@ impl App {
                     "/usr/share/sounds/freedesktop/stereo/message.oga",
                 ] {
                     if std::path::Path::new(p).exists() {
-                        let _ = launcher::runner::spawn_detached(
-                            &format!("pw-play {p} || paplay {p}"),
-                            false,
-                        );
+                        let _ = launcher::runner::spawn_detached(&format!(
+                            "pw-play {p} || paplay {p} || play {p}"
+                        ));
                         break;
                     }
                 }
@@ -1372,31 +1369,6 @@ pub fn load_all_themes() -> BTreeMap<String, Theme> {
     themes
 }
 
-fn connect_hypr(
-    platform: &mut Platform<AppEvent>,
-) -> (Option<HyprSocket>, Option<EventStream>, HyprState) {
-    let Some(socket) = HyprSocket::from_env() else {
-        info!("HYPRLAND_INSTANCE_SIGNATURE not set; running without Hyprland integration");
-        return (None, None, HyprState::unavailable());
-    };
-    let mut state = HyprState::default();
-    state.resync(&socket);
-    let events = hypr::instance_dir().and_then(|dir| match EventStream::connect(&dir) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            warn!("Hyprland event socket: {e:#}");
-            None
-        }
-    });
-    if let Some(stream) = &events {
-        if let Err(e) = register_readable(platform, stream.stream(), AppEvent::HyprReadable) {
-            warn!("hypr events not registered: {e:#}");
-        }
-    }
-    info!(version = %state.version, monitors = state.monitors.len(), "connected to Hyprland");
-    (Some(socket), events, state)
-}
-
 /// Wake the loop with `event` whenever `fd` becomes readable (level-triggered on a dup).
 fn register_readable<F: AsFd>(
     platform: &mut Platform<AppEvent>,
@@ -1426,7 +1398,7 @@ pub trait CloneEvent {
 impl CloneEvent for AppEvent {
     fn clone_event(&self) -> Self {
         match self {
-            AppEvent::HyprReadable => AppEvent::HyprReadable,
+            AppEvent::WmReadable => AppEvent::WmReadable,
             AppEvent::IpcReadable => AppEvent::IpcReadable,
             AppEvent::Tick(t) => AppEvent::Tick(*t),
             _ => unreachable!("only marker events are cloned"),

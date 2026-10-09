@@ -264,13 +264,16 @@ pub fn render(g: &Greeter, width: f32, height: f32) -> Rendered {
 
     // Power buttons.
     if g.cfg.power_buttons {
-        let labels = [
+        let mut labels = vec![
             ("SUSPEND  F2", HIT_SUSPEND),
             ("REBOOT  F3", HIT_REBOOT),
             ("POWER OFF  F4", HIT_POWEROFF),
         ];
+        if !g.can_suspend() {
+            labels.remove(0);
+        }
         let w = 150.0;
-        let mut x = width - 24.0 - w * 3.0 - 16.0;
+        let mut x = width - 24.0 - w * labels.len() as f32 - 8.0 * (labels.len() as f32 - 1.0);
         for (label, id) in labels {
             let r = Rect::new(x, height - 24.0 - line * 1.6, w, line * 1.6);
             ctx.button(r, label, HitTarget::OverlayItem(id), false, true);

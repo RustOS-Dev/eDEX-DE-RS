@@ -22,6 +22,7 @@ settings = { path = "../settings" }
 sysmon = { path = "../sysmon" }
 notifications = { path = "../notifications" }
 hypr = { path = "../hypr" }
+wm = { path = "../wm" }
 ipc = { path = "../ipc" }
 system = { path = "../system" }
 calloop = { workspace = true }

@@ -6,6 +6,7 @@
 
 pub mod events;
 pub mod surface;
+pub mod toplevel;
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -76,6 +77,8 @@ pub use events::{button, KeyInput, Modifiers, OutputInfo, PlatformEvent};
 pub use smithay_client_toolkit::seat::pointer::CursorIcon as Cursor;
 pub use surface::{Edge, SurfaceRole};
 use surface::{SurfaceEntry, SurfaceKind};
+pub use toplevel::{Toplevel, Toplevels};
+use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1;
 
 /// Identifier of a surface created through the platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -234,6 +237,8 @@ pub struct Platform<E: 'static> {
     viewporter: Option<WpViewporter>,
     fractional_manager: Option<WpFractionalScaleManagerV1>,
     data_device_manager: Option<DataDeviceManagerState>,
+    toplevel_manager: Option<ZwlrForeignToplevelManagerV1>,
+    toplevels: Toplevels,
     surfaces: HashMap<SurfaceId, SurfaceEntry>,
     by_wl: HashMap<wayland_client::backend::ObjectId, SurfaceId>,
     next_surface: u64,
@@ -274,6 +279,13 @@ impl<E: 'static> Platform<E> {
         let fractional_manager =
             bind_optional::<WpFractionalScaleManagerV1, Self>(&globals, &qh, 1..=1);
         let data_device_manager = DataDeviceManagerState::bind(&globals, &qh).ok();
+        let toplevel_manager = globals
+            .bind::<ZwlrForeignToplevelManagerV1, Self, _>(
+                &qh,
+                1..=3,
+                toplevel::ToplevelManagerData,
+            )
+            .ok();
 
         let (internal_tx, internal_rx) = channel::channel::<Internal>();
         loop_handle
@@ -292,6 +304,7 @@ impl<E: 'static> Platform<E> {
             viewporter = viewporter.is_some(),
             fractional_scale = fractional_manager.is_some(),
             data_device = data_device_manager.is_some(),
+            foreign_toplevel = toplevel_manager.is_some(),
             "wayland globals bound"
         );
 
@@ -310,6 +323,8 @@ impl<E: 'static> Platform<E> {
             viewporter,
             fractional_manager,
             data_device_manager,
+            toplevel_manager,
+            toplevels: Toplevels::default(),
             surfaces: HashMap::new(),
             by_wl: HashMap::new(),
             next_surface: 1,
@@ -420,6 +435,13 @@ impl<E: 'static> Platform<E> {
 
     pub fn has_xdg_shell(&self) -> bool {
         self.xdg_shell.is_some()
+    }
+
+    /// The compositor's window list (`zwlr_foreign_toplevel_management_v1`), if it offers one.
+    pub fn toplevels(&self) -> Option<Toplevels> {
+        self.toplevel_manager
+            .as_ref()
+            .map(|_| self.toplevels.clone())
     }
 
     pub fn outputs(&self) -> Vec<OutputInfo> {
@@ -1010,6 +1032,7 @@ impl<E: 'static> OutputHandler for Platform<E> {
             return;
         };
         let id = OutputId(info.id);
+        self.toplevels.set_output_name(&output, info.name.clone());
         self.outputs.insert(id, output);
         let info = convert_output_info(id, &info);
         info!(name = ?info.name, size = ?info.logical_size, scale = info.scale_factor, "output added");
@@ -1026,6 +1049,7 @@ impl<E: 'static> OutputHandler for Platform<E> {
             return;
         };
         let id = OutputId(info.id);
+        self.toplevels.set_output_name(&output, info.name.clone());
         self.outputs.entry(id).or_insert(output);
         self.events
             .push_back(PlatformEvent::OutputChanged(convert_output_info(id, &info)));
@@ -1043,6 +1067,7 @@ impl<E: 'static> OutputHandler for Platform<E> {
             .find(|(_, o)| **o == output)
             .map(|(id, _)| *id)
             .or_else(|| self.output_state.info(&output).map(|i| OutputId(i.id)));
+        self.toplevels.set_output_name(&output, None);
         if let Some(id) = id {
             self.outputs.remove(&id);
             info!(?id, "output removed");
@@ -1188,6 +1213,7 @@ impl<E: 'static> SeatHandler for Platform<E> {
         // sctk only calls `new_seat` for seats announced after startup; seats that already
         // existed when we connected (the usual case) first show up here.
         let idx = self.ensure_seat(qh, &seat);
+        self.toplevels.set_seat(Some(seat.clone()));
         let entry = &mut self.seats[idx];
         match capability {
             Capability::Keyboard if entry.keyboard.is_none() => {
@@ -1244,6 +1270,8 @@ impl<E: 'static> SeatHandler for Platform<E> {
 
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
         self.seats.retain(|s| s.seat != seat);
+        self.toplevels
+            .replace_seat(self.seats.first().map(|s| s.seat.clone()));
     }
 }
 

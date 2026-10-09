@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+* **labwc and other wlroots compositors.** A window-manager backend trait (`wm` crate) with two
+  implementations: Hyprland's IPC sockets, and `zwlr_foreign_toplevel_management_v1` for labwc
+  (sway, wayfire…), which drives the centre tab strip — window tabs, activate, minimize, eDEX's
+  maximize and close. `edex-de run --wm labwc|hyprland|none` (default `auto`: Hyprland when it is
+  running, else foreign-toplevel when the compositor offers it); `--no-hypr` now means
+  `--wm labwc`.
+* **labwc configuration from the settings.** Settings → Window manager on labwc writes
+  `~/.config/edex-de/labwc/{rc.xml,environment,menu.xml}`: key bindings mirroring Hyprland's
+  `binds.lua`, a window rule that maximizes every normal window into the terminal slot (labwc fits
+  maximized windows into the area the reserver surfaces leave), no title bars on tiled windows,
+  keyboard repeat, touchpad and the XKB layout; then labwc reconfigures. `edex-de labwc-config
+  [DIR]` writes them for a session script. Rows labwc has no setting for are hidden.
+* **RustOS.** System backends for RustOS behind the same requests: ALSA mixer controls (or the OSS
+  mixer), `wifi`/`ip` (its drivers or wpa_supplicant), `bt`, batteries and backlights in /sys,
+  `poweroff`/`reboot`, /etc/passwd and the commands /etc/rc starts. Settings rows and privacy tabs
+  without a backend are hidden (Tor, Tailscale, VPNs, fingerprint, suspend, screen lock, power
+  profiles…). `EDEX_SYSTEM=linux|rustos` overrides the detection.
+* **Greeter without greetd.** `edex-greeter --backend local` checks passwords against passwd and
+  shadow (SHA-512 crypt) and writes the user name for the session script, which starts the
+  session with `edex-greeter run-as USER -- …`; the default backend picks it on RustOS.
+* D-Bus is optional: without a session bus the shell runs without the notifications server.
+* Launching no longer needs `setsid` or `timeout` binaries; `edex-de ipc launcher` (and the other
+  overlay names) shows that overlay; a system-wide `config.toml` in the share directory provides
+  first-start defaults; the share directory falls back to `/usr/local/share/edex-de`.
+
 ## 3.2.0 — 2026-10-01
 
 * **Privacy panel shows the real state.** Tor and Tailscale were reported as not installed until
