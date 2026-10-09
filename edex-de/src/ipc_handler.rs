@@ -265,7 +265,7 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "notification_server": app.notif_server.as_ref().map(|s| s.is_owner()).unwrap_or(false),
         "theme": app.state.theme.name,
         "live_iso": app.state.live_iso,
-        "status": {"volume": app.state.status.volume, "battery": app.state.status.battery_pct, "tor_mode": app.state.status.tor_mode, "wifi": app.state.status.wifi_ssid},
+        "status": {"volume": app.state.status.volume, "battery": app.state.status.battery_pct, "tor_mode": app.state.status.tor_mode, "wifi": app.state.status.wifi_ssid, "ethernet": app.state.status.ethernet, "bluetooth": app.state.status.bluetooth_on, "system_replies": app.system_replies},
         "sysmon": sysmon_json(app.sysmon.snapshot()),
     })
 }

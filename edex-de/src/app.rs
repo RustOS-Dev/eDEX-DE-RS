@@ -136,6 +136,8 @@ pub struct App {
     known_windows: std::collections::HashSet<String>,
     pub install_button: bool,
     pub smoke_toasts_seen: usize,
+    /// Replies from the system backends so far (IPC state).
+    pub system_replies: u64,
     pub scratch: crate::forms::settings::SettingsScratch,
     pub pscratch: crate::forms::privacy::PrivacyScratch,
 }
@@ -309,6 +311,7 @@ impl App {
             focus_surface: None,
             install_button: false,
             smoke_toasts_seen: 0,
+            system_replies: 0,
             scratch: Default::default(),
             pscratch: Default::default(),
         };
@@ -1351,7 +1354,10 @@ impl App {
                 }
             }
             AppEvent::Notify(ev) => crate::status::notification_event(self, platform, ev),
-            AppEvent::Sys(reply) => crate::status::system_reply(self, platform, reply),
+            AppEvent::Sys(reply) => {
+                self.system_replies += 1;
+                crate::status::system_reply(self, platform, reply)
+            }
             AppEvent::WmReadable => self.drain_wm(platform),
             AppEvent::IpcReadable => crate::ipc_handler::drain(self, platform),
             AppEvent::Tick(t) => self.handle_tick(platform, t),
