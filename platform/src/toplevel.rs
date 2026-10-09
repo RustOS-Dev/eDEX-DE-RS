@@ -280,8 +280,10 @@ impl<E: 'static> Dispatch2<ZwlrForeignToplevelHandleV1, Platform<E>> for Topleve
                 Ev::State { state: raw } => {
                     if let Some(e) = inner.entries.get_mut(&self.0) {
                         let states: Vec<u32> = raw
-                            .chunks_exact(4)
-                            .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .map(|c| u32::from_ne_bytes(*c))
                             .collect();
                         use zwlr_foreign_toplevel_handle_v1::State as S;
                         let has = |s: S| states.contains(&(s as u32));
