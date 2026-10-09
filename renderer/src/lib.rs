@@ -44,7 +44,14 @@ impl GpuContext {
             .map(|s| wgpu::Backends::from_comma_list(&s))
             .filter(|b| !b.is_empty())
             .unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::GL);
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..desc });
+        // The shell issues no indirect draws, and the validation wgpu adds for them needs compute
+        // shaders the GLES context may not have (Mesa softpipe), failing device creation.
+        let flags = desc.flags - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL;
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            flags,
+            ..desc
+        });
         let font_system = FontSystem::new();
         if let Some(fam) = &font_family {
             let available = font_system
