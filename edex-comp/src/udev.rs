@@ -2371,12 +2371,19 @@ impl EdexState<UdevData> {
         }
         .ok_or_else(|| anyhow::anyhow!("no such output"))?;
         let background = self.config.background;
-        let clear = Color32F::new(background[0], background[1], background[2], 1.0);
+        let lock_surface = self.lock_surface_for(&target);
+        let screen = if self.lock.locked {
+            Screen::Locked(lock_surface.as_ref())
+        } else {
+            Screen::Normal {
+                clear: Color32F::new(background[0], background[1], background[2], 1.0),
+            }
+        };
         let img = match self.backend_data.pixman.as_mut() {
             Some(renderer) => crate::screenshot::capture::<
                 _,
                 smithay::reexports::pixman::Image<'static, 'static>,
-            >(renderer, &target, &self.space, clear)?,
+            >(renderer, &target, &self.space, screen)?,
             #[cfg(feature = "gpu")]
             None => {
                 let primary = self.backend_data.primary_gpu;
@@ -2389,7 +2396,7 @@ impl EdexState<UdevData> {
                     &mut renderer,
                     &target,
                     &self.space,
-                    clear,
+                    screen,
                 )?
             }
             #[cfg(not(feature = "gpu"))]

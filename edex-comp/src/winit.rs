@@ -108,13 +108,20 @@ impl Backend for WinitData {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no output"))?;
         let c = state.config.background;
-        let clear = Color32F::new(c[0], c[1], c[2], 1.0);
+        let lock_surface = state.lock_surface_for(&output);
+        let screen = if state.lock.locked {
+            Screen::Locked(lock_surface.as_ref())
+        } else {
+            Screen::Normal {
+                clear: Color32F::new(c[0], c[1], c[2], 1.0),
+            }
+        };
         let renderer = state.backend_data.backend.renderer();
         let img = crate::screenshot::capture::<_, smithay::backend::renderer::gles::GlesTexture>(
             renderer,
             &output,
             &state.space,
-            clear,
+            screen,
         )?;
         let img = match (region, state.space.output_geometry(&output)) {
             (Some(r), Some(geo)) => {

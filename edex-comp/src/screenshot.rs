@@ -5,8 +5,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            damage::OutputDamageTracker, Color32F, ExportMem, ImportAll, ImportMem, Offscreen,
-            Renderer,
+            damage::OutputDamageTracker, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::Space,
@@ -19,12 +18,14 @@ use crate::{
     shell::WindowElement,
 };
 
-/// Render `output` into an offscreen buffer of type `T` and read it back as RGBA.
+/// Render `output` into an offscreen buffer of type `T` and read it back as RGBA. `screen` is
+/// what the output shows: while the session is locked a screenshot shows the lock screen, never
+/// the session behind it.
 pub fn capture<R, T>(
     renderer: &mut R,
     output: &Output,
     space: &Space<WindowElement>,
-    clear: Color32F,
+    screen: Screen<'_>,
 ) -> Result<image::RgbaImage>
 where
     R: Renderer + ImportAll + ImportMem + Offscreen<T> + ExportMem,
@@ -38,14 +39,7 @@ where
     let mut target: T = renderer
         .create_buffer(Fourcc::Abgr8888, buffer_size)
         .context("creating the offscreen buffer")?;
-    let (elements, _) = output_elements(
-        output,
-        space,
-        Vec::new(),
-        renderer,
-        false,
-        Screen::Normal { clear },
-    );
+    let (elements, clear) = output_elements(output, space, Vec::new(), renderer, false, screen);
     let mut framebuffer = renderer.bind(&mut target).context("binding the buffer")?;
     let mut damage = OutputDamageTracker::new(size, scale, Transform::Normal);
     damage
