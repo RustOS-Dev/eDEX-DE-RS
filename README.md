@@ -305,7 +305,7 @@ See [docs/testing.md](docs/testing.md).
 * **Nothing but Hyprland's default look after login** — the shell is a user service: check
   `systemctl --user status edex-de` and `journalctl --user -u edex-de`. The session log is in
   `~/.local/state/edex-de/session.log`.
-* **GPU errors** — eDEX-DE uses Vulkan and falls back to GL. `edex-de ipc state` shows the adapter; on VMs
+* **GPU errors** — eDEX-DE uses Vulkan and falls back to GL (`WGPU_BACKEND=gl` or `vulkan` forces one). `edex-de ipc state` shows the adapter; on VMs
   install `vulkan-swrast` (llvmpipe).
 * **Hyprland config errors** — `~/.config/hypr/hyprland.lua` must `require` the system file; run
   `Hyprland --verify-config` after editing `user.lua`.

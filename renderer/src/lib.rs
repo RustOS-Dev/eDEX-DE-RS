@@ -27,8 +27,12 @@ pub struct GpuContext {
 
 impl GpuContext {
     pub fn new(font_family: Option<String>) -> Self {
+        // WGPU_BACKEND=gl|vulkan picks one (e.g. GLES on Mesa EGL where there is no Vulkan
+        // driver, as on RustOS); by default Vulkan, falling back to GL.
+        let backends =
+            wgpu::Backends::from_env().unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::GL);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            backends,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let font_system = FontSystem::new();
