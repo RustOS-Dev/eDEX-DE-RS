@@ -773,10 +773,13 @@ enum OutputDrm {
 }
 
 impl OutputDrm {
+    /// Forget what the buffers hold: the next frame is drawn in full. Only the ages are reset;
+    /// dropping the GPU swapchain's buffers would remove the framebuffer on screen, and the
+    /// kernel turns a CRTC off when its framebuffer is removed (RMFB).
     fn reset_buffers(&mut self) {
         match self {
             #[cfg(feature = "gpu")]
-            OutputDrm::Gpu(o) => o.reset_buffers(),
+            OutputDrm::Gpu(o) => o.with_compositor(|c| c.reset_buffer_ages()),
             OutputDrm::Pixman(o) => o.reset_buffers(),
         }
     }
