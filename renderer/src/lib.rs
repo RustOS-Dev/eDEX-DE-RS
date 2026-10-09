@@ -82,11 +82,13 @@ impl GpuContext {
         self.font_family = family;
     }
 
-    /// True when rendering runs on the CPU (llvmpipe/lavapipe: VMs, missing GPU drivers).
+    /// True when rendering runs on the CPU (llvmpipe/lavapipe/softpipe: VMs, missing GPU
+    /// drivers). Mesa's GL drivers report their device type as "other", so go by name too.
     pub fn is_software(&self) -> bool {
-        self.adapter
-            .as_ref()
-            .is_some_and(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+        self.adapter.as_ref().is_some_and(|a| {
+            let i = a.get_info();
+            i.device_type == wgpu::DeviceType::Cpu || is_software_name(&i.name)
+        })
     }
 
     /// Adapter description for the About page.
@@ -113,7 +115,9 @@ impl GpuContext {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("eDEX-DE device"),
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            // No compute or storage buffers: GL contexts without compute shaders work too.
+            required_limits:
+                wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
             memory_hints: wgpu::MemoryHints::Performance,
             trace: wgpu::Trace::Off,
@@ -409,5 +413,22 @@ fn to_linear_if(c: [f32; 4], srgb: bool) -> [f32; 4] {
         [c[0].powf(2.2), c[1].powf(2.2), c[2].powf(2.2), c[3]]
     } else {
         c
+    }
+}
+
+fn is_software_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["llvmpipe", "softpipe", "lavapipe", "swrast", "swiftshader"]
+        .iter()
+        .any(|s| n.contains(s))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn software_adapters_by_name() {
+        assert!(super::is_software_name("softpipe"));
+        assert!(super::is_software_name("llvmpipe (LLVM 20.1.2, 256 bits)"));
+        assert!(!super::is_software_name("AMD Radeon RX 7600 (RADV NAVI33)"));
     }
 }
