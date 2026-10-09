@@ -208,6 +208,15 @@ pub enum WindowAction {
 /// Apply a window control through the window manager; the resulting events refresh the tab
 /// strip.
 pub fn window_action(app: &mut App, address: &str, action: WindowAction) {
+    // Focusing a window needs the shell's keyboard grab released first (labwc); the main loop
+    // does that and then applies the action.
+    if matches!(action, WindowAction::Focus | WindowAction::Restore) && app.holds_keyboard_grab() {
+        app.pending_window_action = Some((address.to_string(), action));
+        if let Ok(tx) = app.tx.lock() {
+            let _ = tx.send(AppEvent::WmReadable);
+        }
+        return;
+    }
     let wm = &mut app.wm;
     let result = match action {
         WindowAction::Focus => wm.focus_window(address),

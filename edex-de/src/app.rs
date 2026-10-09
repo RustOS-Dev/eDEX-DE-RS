@@ -126,8 +126,14 @@ pub struct App {
     pub frames: u64,
     pub tx: Arc<Mutex<channel::Sender<AppEvent>>>,
     pub focus_surface: Option<SurfaceId>,
-    /// Canvas holding a temporary exclusive keyboard grab until focus arrives.
+    /// Canvas holding an exclusive keyboard grab: until focus arrives (Hyprland), or for as long
+    /// as the shell has the keyboard (labwc moves focus away when a focused layer surface turns
+    /// on-demand, so the grab lasts until a window should get the keyboard).
     focus_grab: Option<SurfaceId>,
+    /// A window control waiting for the grab to be released first (labwc).
+    pub pending_window_action: Option<(String, crate::input::WindowAction)>,
+    /// Windows seen so far: a new one gets the keyboard (labwc).
+    known_windows: std::collections::HashSet<String>,
     pub install_button: bool,
     pub smoke_toasts_seen: usize,
     pub scratch: crate::forms::settings::SettingsScratch,
@@ -291,6 +297,8 @@ impl App {
             last_input: Instant::now(),
             last_cursor_visible: true,
             focus_grab: None,
+            pending_window_action: None,
+            known_windows: Default::default(),
             last_pulse: -1.0,
             toolkit_key: None,
             started: Instant::now(),
@@ -1017,9 +1025,32 @@ impl App {
         self.mark_canvas_dirty();
     }
 
+    /// labwc takes keyboard focus away from a layer surface that turns on-demand, so there the
+    /// shell keeps its exclusive grab while it has the keyboard.
+    fn grab_holds_focus(&self) -> bool {
+        self.wm.kind() == wm::WmKind::Labwc
+    }
+
+    /// The shell holds the keyboard with an exclusive grab that windows cannot take over.
+    pub fn holds_keyboard_grab(&self) -> bool {
+        self.grab_holds_focus() && self.focus_grab.is_some()
+    }
+
+    /// Let windows have the keyboard again: release the shell's exclusive grab (labwc then
+    /// focuses the topmost window).
+    pub fn yield_keyboard(&mut self, platform: &mut Platform<AppEvent>) {
+        if let Some(canvas) = self.focus_grab.take() {
+            platform.release_keyboard_grab(canvas);
+        }
+    }
+
     /// The window manager has news (its event socket is readable, or the compositor's window
     /// list changed).
     pub fn drain_wm(&mut self, platform: &mut Platform<AppEvent>) {
+        if let Some((address, action)) = self.pending_window_action.take() {
+            self.yield_keyboard(platform);
+            crate::input::window_action(self, &address, action);
+        }
         let update = self.wm.refresh();
         if update.lost {
             warn!("lost the connection to the window manager");
@@ -1028,6 +1059,18 @@ impl App {
             self.state.terminal.frame.bell = true;
         }
         if update.changed {
+            // A new window gets the keyboard.
+            let ids: std::collections::HashSet<String> = self
+                .wm
+                .state()
+                .windows
+                .iter()
+                .map(|w| w.id.clone())
+                .collect();
+            if self.grab_holds_focus() && ids.iter().any(|id| !self.known_windows.contains(id)) {
+                self.yield_keyboard(platform);
+            }
+            self.known_windows = ids;
             self.update_wm_view();
             // A window was maximized or restored: give it (or take back) the side panels' space.
             let changed = self
@@ -1186,7 +1229,7 @@ impl App {
             }
             PlatformEvent::KeyboardEnter { surface } => {
                 self.focus_surface = Some(surface);
-                if self.focus_grab == Some(surface) {
+                if self.focus_grab == Some(surface) && !self.grab_holds_focus() {
                     platform.release_keyboard_grab(surface);
                     self.focus_grab = None;
                 }
@@ -1224,6 +1267,14 @@ impl App {
             }
             PlatformEvent::PointerLeave { surface } => {
                 self.pointer.remove(&surface);
+                // Heading for a window: let it take the keyboard on click (labwc ignores clicks
+                // for focus while a layer surface holds an exclusive grab).
+                if self.holds_keyboard_grab()
+                    && platform.surface_role(surface) == Some(SurfaceRole::Canvas)
+                    && self.state.windows.iter().any(|w| !w.minimized)
+                {
+                    self.yield_keyboard(platform);
+                }
                 self.state.keyboard.hover = None;
                 self.state.resize.hover = None;
                 self.mark_canvas_dirty();
