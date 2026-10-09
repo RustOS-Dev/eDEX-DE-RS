@@ -266,5 +266,23 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "theme": app.state.theme.name,
         "live_iso": app.state.live_iso,
         "status": {"volume": app.state.status.volume, "battery": app.state.status.battery_pct, "tor_mode": app.state.status.tor_mode, "wifi": app.state.status.wifi_ssid},
+        "sysmon": sysmon_json(app.sysmon.snapshot()),
+    })
+}
+
+/// What the system panel shows (for tests and scripts).
+fn sysmon_json(s: &sysmon::SysSnapshot) -> serde_json::Value {
+    serde_json::json!({
+        "cpu_total": s.cpu_total,
+        "cpu_usage": s.cpu_usage,
+        "cpu_model": s.cpu_model,
+        "load_avg": s.load_avg,
+        "ram_used_kb": s.ram_used_kb,
+        "ram_total_kb": s.ram_total_kb,
+        "net_iface": s.net_iface,
+        "net_ip": s.net_ip,
+        "disks": s.disks.len(),
+        "processes": s.processes.len(),
+        "kernel": s.kernel,
     })
 }
