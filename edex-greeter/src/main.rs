@@ -418,6 +418,16 @@ fn run(cli: Cli) -> Result<i32> {
     g.tick_clock();
 
     let surfaces: Vec<SurfaceId> = if cli.lock {
+        // The lock covers the outputs known when it is taken: wait for the compositor to
+        // announce them (they arrive after the globals; locking before that would leave the
+        // screen black with no lock surface to type into).
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while platform.outputs().is_empty() && Instant::now() < deadline {
+            platform.dispatch(&mut event_loop, Some(Duration::from_millis(50)))?;
+        }
+        if platform.outputs().is_empty() {
+            warn!("no outputs announced; locking anyway");
+        }
         platform.lock_session().context("locking the session")?
     } else {
         vec![platform
