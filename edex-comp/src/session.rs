@@ -412,6 +412,12 @@ impl Supervisor {
         }
     }
 
+    /// Nothing it started is still running (after [`Supervisor::shutdown`] and
+    /// [`Supervisor::reap`]).
+    pub fn is_finished(&self) -> bool {
+        self.detached.is_empty() && self.services.iter().all(|s| s.child.is_none())
+    }
+
     pub fn status(&self) -> HashMap<String, bool> {
         self.services
             .iter()

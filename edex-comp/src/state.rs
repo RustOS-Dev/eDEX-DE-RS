@@ -210,6 +210,9 @@ pub struct EdexState<BackendData: Backend + 'static> {
     pub last_snapshot: Snapshot,
     pub layout_dirty: bool,
     pub supervisor: Option<Supervisor>,
+    /// Supervisors that were shut down (the greeter's, after login), kept until their programs
+    /// have exited and been reaped.
+    pub retired: Vec<Supervisor>,
     pub mode: RunMode,
     pub runtime_dir: PathBuf,
     pub lock: LockState,
@@ -853,6 +856,7 @@ impl<BackendData: Backend + 'static> EdexState<BackendData> {
             last_snapshot: Snapshot::default(),
             layout_dirty: true,
             supervisor: None,
+            retired: Vec::new(),
             mode: if opts.greeter {
                 RunMode::Greeter
             } else {

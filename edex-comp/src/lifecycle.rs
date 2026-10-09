@@ -134,6 +134,8 @@ impl<B: Backend + 'static> EdexState<B> {
         info!(user = user.name, "starting session");
         if let Some(mut greeter) = self.supervisor.take() {
             greeter.shutdown();
+            // Reaped by `tick` once it has exited (it may be in the middle of a frame).
+            self.retired.push(greeter);
         }
         let runtime_dir = match session::ensure_runtime_dir(&user) {
             Ok(d) => d,
@@ -277,6 +279,10 @@ impl<B: Backend + 'static> EdexState<B> {
             sup.reap();
             sup.tick();
         }
+        self.retired.retain_mut(|sup| {
+            sup.reap();
+            !sup.is_finished()
+        });
         if self.config_watcher.as_ref().is_some_and(|w| w.changed()) {
             self.reload_config();
         }
