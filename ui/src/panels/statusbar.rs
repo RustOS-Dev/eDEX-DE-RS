@@ -56,6 +56,7 @@ pub fn draw(ctx: &mut Ctx, rect: Rect, state: &ShellState) {
             item: StatusItem::Fingerprint,
         },
     ];
+    left.retain(|i| !s.unavailable.contains(&i.item));
     left.push(Indicator {
         text: if s.mic_active {
             "MIC ●".into()

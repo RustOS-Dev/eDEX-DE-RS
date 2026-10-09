@@ -53,6 +53,8 @@ pub struct SysInfo {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StatusInfo {
+    /// Indicators with no backend on this system (not drawn).
+    pub unavailable: Vec<crate::hit::StatusItem>,
     pub volume: Option<u8>,
     pub muted: bool,
     pub mic_muted: bool,

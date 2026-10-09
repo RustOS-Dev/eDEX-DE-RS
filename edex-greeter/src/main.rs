@@ -284,7 +284,9 @@ impl Greeter {
                     g.start_session(cmd, env)?;
                     Ok(Step::Success)
                 });
-                // The second Success (from start_session) ends the greeter.
+                // `call` marks the greeter busy; the reply to start_session (handled in
+                // on_greetd while Starting) ends it.
+                self.phase = Phase::Starting;
                 self.exit_code = 0;
             }
             Ok(Step::Failed(msg)) => {

@@ -164,6 +164,7 @@ impl App {
             ui::boot::BootAnimation::new(config.appearance.boot_animation && opts.smoke.is_none());
         state.username = std::env::var("USER").unwrap_or_default();
         state.live_iso = std::path::Path::new("/run/archiso").exists();
+        state.status.unavailable = unavailable_indicators(&system::Capabilities::current());
         state.filesystem = ui::filesystem::FilesystemPanel::new();
 
         let (tx, rx) = channel::channel::<AppEvent>();
@@ -1487,4 +1488,24 @@ pub fn run(opts: RunOptions) -> Result<i32> {
         return Ok(if ok { 0 } else { 1 });
     }
     Ok(0)
+}
+
+/// Status-bar indicators the system has no backend for (Tor, Tailscale, VPNs and fprintd on
+/// RustOS).
+fn unavailable_indicators(caps: &system::Capabilities) -> Vec<ui::hit::StatusItem> {
+    use ui::hit::StatusItem;
+    let mut out = Vec::new();
+    if !caps.tor {
+        out.push(StatusItem::Tor);
+    }
+    if !caps.tailscale {
+        out.push(StatusItem::Tailscale);
+    }
+    if !caps.vpn {
+        out.extend([StatusItem::Vpn, StatusItem::WireGuard]);
+    }
+    if !caps.fingerprint {
+        out.push(StatusItem::Fingerprint);
+    }
+    out
 }
