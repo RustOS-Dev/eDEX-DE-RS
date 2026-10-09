@@ -74,3 +74,8 @@ fuzzy-matcher = "0.3"
 xdg = "2"
 insta = "1"
 tempfile = "3"
+
+# wgpu-hal 29.0.4 with one fix (third_party/wgpu-hal/PATCHES.md): GLES shaders bind their textures
+# correctly on GL 3.3 drivers that also offer compute shaders, like Mesa's softpipe (RustOS).
+[patch.crates-io]
+wgpu-hal = { path = "third_party/wgpu-hal" }

@@ -120,13 +120,23 @@ impl GpuContext {
     }
 
     /// The wgpu instance, connected to the display the surfaces live on. Vulkan and GLES (EGL
-    /// on Wayland); `WGPU_BACKEND` and the other wgpu variables override the defaults.
+    /// on Wayland): when the Vulkan loader finds no device (Mesa's RADV and ANV without their
+    /// GPUs, no lavapipe), the adapter request falls through to GLES, e.g. Mesa's softpipe.
+    /// `WGPU_BACKEND` and the other wgpu variables override the defaults.
+    ///
+    /// Indirect-call validation is off: eDEX never draws indirectly, and wgpu builds its
+    /// validation compute shaders at device creation, which fails (losing the device) on GL
+    /// drivers that offer compute shaders with GLSL 3.30 only, like Mesa's softpipe.
     fn instance(&mut self, display: RawDisplayHandle) -> &wgpu::Instance {
         self.instance.get_or_insert_with(|| {
+            let base =
+                wgpu::InstanceDescriptor::new_with_display_handle(Box::new(Display(display)));
+            let flags = base.flags - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL;
             wgpu::Instance::new(
                 wgpu::InstanceDescriptor {
                     backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
-                    ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(Display(display)))
+                    flags,
+                    ..base
                 }
                 .with_env(),
             )
@@ -148,7 +158,7 @@ impl GpuContext {
         }))
         .map_err(|e| anyhow!("no compatible GPU adapter: {e}"))?;
         let info = adapter.get_info();
-        info!(name = %info.name, backend = ?info.backend, kind = ?info.device_type, "gpu adapter selected");
+        info!(name = %info.name, driver = %info.driver_info, backend = ?info.backend, kind = ?info.device_type, "gpu adapter selected");
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("eDEX-DE device"),
             required_features: wgpu::Features::empty(),
