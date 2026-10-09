@@ -6,13 +6,18 @@ and how eDEX-DE behaves when one is missing.
 
 ## Status
 
-* **edex-comp runs on RustOS** since M37: on Linux DRM through LinuxKPI (`cargo build --features
-  linux-drivers`; tested on QEMU's bochs) with libseat's builtin seat, libinput and
-  libudev-zero, rendering with **pixman** into DRM dumb buffers. RustOS's `desktop-edex` scenario
-  boots it with `--run weston-terminal`, checks `edex-comp state`, a screendump and typing.
-* **edex-de and edex-greeter** build and are installed, but draw with wgpu (Vulkan or GLES through
-  EGL), which needs Mesa: **M41**. Until then the `edex` service (whose login screen is
-  `edex-greeter`) cannot be used either; run `edex-comp run --run CLIENT` instead.
+* **The full session runs on RustOS** since Mesa (M41): `svc start edex` starts `edex-comp
+  --greeter` on tty1, edex-comp renders with **GLES through GBM/EGL** on Linux DRM (Mesa's softpipe
+  through kms_swrast on QEMU's bochs; `cargo build --features linux-drivers`), `edex-greeter` logs
+  root in (password checked by `edex-auth`), edex-comp starts the session and the shell, and
+  `SUPER+Alt+L` locks it with `edex-greeter --lock`. The shell and the greeter draw with wgpu's GL
+  backend on softpipe: there is no Vulkan device without a GPU (RADV and ANV need hardware, there
+  is no lavapipe). RustOS's `desktop-edex-session` scenario logs in, types into the shell's
+  terminal, locks, unlocks and logs out, checking screendumps along the way.
+* **pixman** stays as edex-comp's fallback (no GBM/EGL) and is forced with `EDEX_RENDERER=pixman`;
+  RustOS's `desktop-edex` scenario runs it with `--run weston-terminal`.
+* On a software rasterizer the shell and the greeter turn their animations off and redraw only
+  what changed (see [Software rendering](#software-rendering)).
 
 ## Building
 
@@ -27,13 +32,13 @@ The RustOS port recipe (`ports/edex-de/build.sh` in RustOS) is the build contrac
   `PKG_CONFIG_ALLOW_CROSS=1`) and linked with `-L <stage>/usr/local/lib` and
   `-Wl,-rpath-link` to it. `libgcc_s.so.1` (the unwinder Rust's std needs) is the **libunwind
   port**.
-* `edex-comp` is built with `--no-default-features` (no `gpu`: pixman, no `libgbm`/`libEGL`), the
-  other binaries with their defaults. The recipe checks that every `NEEDED` library is in the stage,
-  musl's `libc.so` or `libgcc_s.so.1`:
+* Every binary is built with its default features: `edex-comp` with `gpu` (GLES through GBM/EGL,
+  pixman as the fallback). The recipe checks that every `NEEDED` library is in the stage, musl's
+  `libc.so` or `libgcc_s.so.1`:
 
 | Binary | Needs |
 |---|---|
-| `edex-comp` | `libwayland-server`, `libxkbcommon`, `libinput`, `libseat`, `libudev` (libudev-zero), `libpixman-1` |
+| `edex-comp` | `libgbm`, `libxkbcommon`, `libinput`, `libseat`, `libudev` (libudev-zero), `libpixman-1`; `libEGL` and `libwayland-server` are loaded at run time |
 | `edex-de`, `edex-greeter` | `libxkbcommon`; `libwayland-client` is loaded at run time, and so are `libvulkan`/`libEGL` (wgpu) |
 | `edex-auth` | musl only |
 
@@ -66,7 +71,7 @@ Other RustOS ports the desktop uses: `jetbrains-mono-nerd` (the UI font), `tor`,
 |---|---|---|
 | DRM/KMS (`/dev/dri/card*`), dumb buffers, page flips, gamma LUT | edex-comp output (pixman), night light | M35 (done) |
 | render nodes, dma-buf | edex-comp GPU rendering | M38–M40 |
-| Mesa EGL/GBM (GL ES 2+, its software rasterizer without a GPU driver), Vulkan or EGL for wgpu | edex-comp GPU rendering (pixman until then), shell and greeter rendering | M41 |
+| Mesa EGL/GBM (GL ES 2+, its software rasterizer without a GPU driver), Vulkan or EGL for wgpu | edex-comp GPU rendering (pixman without it), shell and greeter rendering | M41 (done) |
 | `AF_UNIX` named sockets with `SCM_RIGHTS` and `SO_PEERCRED` | Wayland, D-Bus, the control and IPC sockets | M36 |
 | `memfd_create` + seals, `MAP_SHARED` | Wayland shm buffers, keymaps | M36 |
 | `inotify` | live config reload (`notify` crate) | M36 |
@@ -85,6 +90,8 @@ Other RustOS ports the desktop uses: `jetbrains-mono-nerd` (the UI font), `tor`,
 | the `svc` service manager | Services panel, Tor, the `edex` service | RustOS M43 (this port) |
 | Linux signal frames (`siginfo`, `ucontext`, `sigaltstack`), per-thread signal masks | Rust's stack-overflow handler, the Go pluggable transports (lyrebird, snowflake) | RustOS M43 (this port) |
 | `libgcc_s.so.1` (the `libunwind` port) | every eDEX binary (Rust's std, dynamically linked for musl) | RustOS M43 (this port) |
+| `TIOCGPTPEER` on `/dev/ptmx` | the shell's terminal (alacritty_terminal opens the pty with rustix, which needs it) | RustOS M43 (this port) |
+| `mincore` | Mesa's EGL (checks native display pointers) | RustOS M43 (this port) |
 
 ## NetworkManager D-Bus subset (`rustos-nmd`)
 
@@ -146,11 +153,39 @@ The same goes for the system changes the shell makes directly: `svc start|stop|e
 `/storage/etc/tor` and drive `svc`) and the backlight. With real users these need a small
 privilege broker (the role polkit plays on Linux); until then the shell's session runs as root.
 
+## Software rendering
+
+Without a GPU driver everything is drawn by Mesa's softpipe on the CPU (QEMU without virgl, a
+machine whose GPU has no driver yet). eDEX-DE recognises such an adapter (`is_software`: wgpu's
+CPU device type, or a softpipe/llvmpipe/swrast adapter name) and then:
+
+* turns off the continuous animations (the shell's border pulse and cursor blink, the greeter's
+  background pulse) and the scanline overlay, so it draws only when something changes;
+* renders into an `Rgba8Unorm` target rather than an sRGB one (no per-pixel sRGB conversion when
+  blending);
+* redraws only the changed parts of a frame: the scene is fingerprinted in 32-pixel tiles, the
+  changed tiles are drawn (scissored) into a texture that keeps its contents, and that texture is
+  copied to the surface in one pass (`renderer/src/retained.rs`). `EDEX_FULL_REDRAW=1` turns this
+  off;
+* logs the time of each surface's first frame and reports the last frame's time in
+  `edex-de ipc state` (`frame_ms`).
+
+wgpu 29 needs one fix for softpipe, carried in `third_party/wgpu-hal` (see its `PATCHES.md`):
+softpipe offers GL 3.3 with compute shaders, and wgpu then assumed shaders could carry
+`layout(binding)`, which GLSL 3.30 cannot, so every texture sampled unit 0 and no text appeared.
+wgpu's indirect-draw validation is turned off for the same reason (its compute shaders do not
+compile for GLSL 3.30, and eDEX draws nothing indirectly).
+
+Measured in QEMU (TCG, 2 vCPUs, no KVM) on RustOS: the greeter's and the shell's first frames take
+about 30 s, later shell frames a few seconds (most of it is the two full-screen copies every
+frame: wgpu's present blit and the canvas copy). edex-comp's GLES compositing on softpipe costs
+most of a CPU while the shell draws; with `EDEX_RENDERER=pixman` it uses a few percent, since
+softpipe clients send `wl_shm` buffers anyway.
+
 ## Without the full stack
 
-* No Mesa (until M41): edex-comp renders with pixman on dumb buffers; the shell and the greeter do
-  not start. With Mesa but no GPU driver, Mesa's software rasterizer renders (GBM/EGL on the KMS
-  device).
+* No Mesa: edex-comp renders with pixman on dumb buffers; the shell and the greeter do not start.
+  With Mesa but no GPU driver, Mesa's software rasterizer renders everything (above).
 * No Xwayland: X11 applications do not start; everything else works.
 * A missing service (UPower, `rustos-nmd`, PipeWire, Tor, Tailscale, fprintd, power-profiles-daemon):
   the matching panel says "unavailable" instead of showing stale values.

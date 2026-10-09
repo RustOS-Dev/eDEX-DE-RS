@@ -10,11 +10,11 @@ system dashboard, launcher, settings, privacy panel, notifications, power menu, 
 screens), and the compositor, **edex-comp**, tiles applications into the shell's centre panel next
 to its terminal tabs.
 
-eDEX-DE targets RustOS. Its compositor runs there today, on DRM/KMS (M35), the desktop kernel
-features (M36) and the Wayland stack (M37), rendering with pixman until Mesa arrives (M41); the
-shell and the greeter draw with wgpu and wait for Mesa, and the full session for the desktop
-services of M42 (seatd, D-Bus, PipeWire, UPower, `rustos-nmd`). [docs/rustos.md](docs/rustos.md)
-lists exactly what it needs from RustOS.
+eDEX-DE targets RustOS. The full session runs there: the login screen, the shell and the lock
+screen on edex-comp, on DRM/KMS (M35), the desktop kernel features (M36), the Wayland stack (M37)
+and Mesa (M41), with GLES through GBM/EGL, or Mesa's software rasterizer when there is no GPU
+driver. The desktop services of M42 (seatd, D-Bus, PipeWire, UPower, `rustos-nmd`) light up the
+remaining panels. [docs/rustos.md](docs/rustos.md) lists exactly what it needs from RustOS.
 
 ## What you get
 
@@ -43,7 +43,7 @@ Wayland stack (RustOS's `docs/DESKTOP.md`):
 # in a RustOS checkout
 git submodule update --init third_party/musl
 rustup target add x86_64-unknown-linux-musl
-tools/install-port.sh --initramfs weston       # Wayland, libinput, seatd, pixman, ...
+tools/install-port.sh --initramfs weston       # Wayland, libinput, seatd, pixman, Mesa, ...
 tools/install-port.sh --initramfs libunwind    # libgcc_s.so.1 for dynamically linked Rust
 tools/install-port.sh --initramfs edex-de      # EDEX_SRC=$HOME/eDEX-DE-RS for a local checkout
 tools/install-port.sh --initramfs jetbrains-mono-nerd
@@ -51,20 +51,21 @@ cargo build --features linux-drivers           # DRM (bochs, virtio-gpu, simpled
 ./write_to_drive.sh --drive /dev/sdX
 ```
 
-The port builds `edex-comp` without its `gpu` feature: it renders with pixman into DRM dumb
-buffers and needs neither GBM nor EGL. Run it from a console with a client of your choice:
+The port builds every binary with its default features: `edex-comp` renders with GLES through
+Mesa's GBM/EGL (softpipe when there is no GPU driver) and falls back to pixman on DRM dumb buffers
+without them (`EDEX_RENDERER=pixman` forces it); the shell and the greeter draw with wgpu, on
+Vulkan or GLES. The desktop is turned on with the `edex` service (tty1, every boot):
+
+```sh
+svc enable edex && svc start edex
+```
+
+To try the compositor alone from a console, with a client of your choice:
 
 ```sh
 mkdir -p /tmp/xdg; chmod 700 /tmp/xdg
 export XDG_RUNTIME_DIR=/tmp/xdg LIBSEAT_BACKEND=builtin
 edex-comp run --run weston-terminal &
-```
-
-`edex-de` and `edex-greeter` are installed too but draw with wgpu, which needs Mesa (RustOS M41).
-From then on the desktop is turned on with the `edex` service (tty1, every boot):
-
-```sh
-svc enable edex && svc start edex
 ```
 
 The service runs `edex-comp --greeter` as root on tty1. After you log in, edex-comp starts your
@@ -88,7 +89,7 @@ EDEX_SHARE_DIR=$PWD/share cargo run -p edex-comp -- run --nested
 cargo run -p edex-comp -- run --nested --run foot
 # The greeter without a compositor:
 cargo run -p edex-greeter -- --demo
-# edex-comp as RustOS builds it (pixman, no GBM/EGL; no nested mode):
+# edex-comp without Mesa (pixman only, no GBM/EGL; no nested mode):
 cargo build -p edex-comp --no-default-features
 ```
 

@@ -25,8 +25,8 @@ edex-comp screenshot [--output NAME] [--region "X,Y WxH"] FILE.png
 
 | Build | Renderer on DRM/KMS |
 |---|---|
-| default (`gpu` feature) | GLES through GBM/EGL (Smithay's `DrmOutput`: GBM swapchain, plane scan-out, linux-dmabuf, explicit sync, several GPUs). Mesa's software rasterizer counts as a GPU. If GBM or EGL cannot be set up on the primary device (no `libEGL`, no driver), every output falls back to pixman |
-| `--no-default-features` (the RustOS port until Mesa, M41) | pixman only; no `libgbm` or `libEGL` linked |
+| default (`gpu` feature; the RustOS port) | GLES through GBM/EGL (Smithay's `DrmOutput`: GBM swapchain, plane scan-out, linux-dmabuf, explicit sync, several GPUs). Mesa's software rasterizer counts as a GPU (softpipe through kms_swrast on RustOS without a GPU driver: the log says `output Virtual-1 enabled 1280x800 (GLES)`). If GBM or EGL cannot be set up on the primary device (no `libEGL`, no driver), every output falls back to pixman |
+| `--no-default-features` | pixman only; no `libgbm` or `libEGL` linked |
 
 The pixman path (`src/dumb.rs`) renders each output with Smithay's `PixmanRenderer` and damage
 tracking into two DRM dumb buffers mapped into memory, and page-flips them on the CRTC's primary
@@ -34,6 +34,14 @@ plane. It needs nothing but KMS dumb buffers, which simple drivers like bochs, v
 `wl_shm` only (no linux-dmabuf). `EDEX_RENDERER=pixman` forces it in a `gpu` build. The log says
 which renderer runs (`rendering with pixman`) and every enabled output
 (`output Virtual-1 enabled 1280x800 (pixman)`).
+
+Damage that only needs a full redraw (configuration changes, locking) resets the swapchain's buffer
+ages; the buffers themselves are kept, because dropping the GBM swapchain would remove the
+framebuffer on screen and the kernel turns a CRTC off when its framebuffer goes away.
+
+On a software rasterizer GLES costs far more than pixman (in QEMU, most of a CPU against a few
+percent while the shell draws): softpipe clients send `wl_shm` buffers, which pixman composites
+directly. `EDEX_RENDERER=pixman` is the better choice on machines without a GPU driver.
 
 The `gpu` feature turns on Smithay's `backend_gbm`, `backend_egl`, `renderer_gl`, `renderer_multi`
 and `backend_winit`; without it `--nested` exits with an error.
@@ -100,7 +108,7 @@ one reply per request; the schema is `comp-proto/src/proto.rs`.
 | `set-app-area` | `output`, `tiled`, `maximized` (`{x,y,w,h}`) | |
 | `exec` | `command`, `env` | `{"pid"}` |
 | `lock`, `exit`, `reload`, `dpms` (`on`) | | |
-| `screenshot` | `path`, `output`, `region` | PNG written |
+| `screenshot` | `path`, `output`, `region` | PNG written; while the session is locked it shows the lock screen |
 | `binds` | | `{"binds":["SUPER+Q → close", …]}` |
 | `services`, `restart-service` (`name`) | | session programs |
 | `login` | `user`, `password`, `session` | greeter: start the session; session: verify for the lock screen |

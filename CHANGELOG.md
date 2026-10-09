@@ -37,6 +37,24 @@ the `edex` service. It needs RustOS's graphics and desktop milestones; see
   fontconfig's file is not in `/etc/fonts`.
 * wgpu gets the Wayland display (its GLES backend needs it to present) and honours `WGPU_BACKEND`
   and the other wgpu environment variables.
+* **The full session runs on RustOS with Mesa** (M41), with GLES in edex-comp and wgpu's GL backend
+  in the shell and the greeter, on softpipe when there is no GPU driver. The RustOS port now builds
+  edex-comp with its `gpu` feature; pixman stays as the fallback and with `EDEX_RENDERER=pixman`.
+* **Software rendering**: on a CPU rasterizer (softpipe, llvmpipe, lavapipe) the shell and the
+  greeter turn off animations, scanlines and the cursor blink, render to a UNORM target and redraw
+  only the tiles whose content changed into a retained canvas (`EDEX_FULL_REDRAW=1` turns it off).
+  The rectangle shader converts colours once per vertex and skips the distance field for plain
+  rectangles and panel interiors. The first frame's time is logged; `edex-de ipc state` reports
+  `frame_ms`.
+* wgpu-hal 29.0.4 is patched (`third_party/wgpu-hal`): on GL 3.3 drivers with compute shaders
+  (softpipe) every texture sampled unit 0, so no text was drawn. wgpu's indirect-draw validation
+  is off (its compute shaders need GLSL 4.30 or ES 3.10; nothing is drawn indirectly).
+* Fixed: edex-comp dropped its GBM swapchain on configuration changes and on lock, removing the
+  framebuffer on screen (the kernel then turned the CRTC off and the next page flip failed); it
+  now only resets the buffer ages. The lock screen waited for no outputs and could lock with no
+  surface, leaving the screen black; it now waits for the compositor's outputs. Screenshots taken
+  while locked showed the session instead of the lock screen. The greeter was not reaped after
+  login (a zombie until edex-comp exited).
 
 ## 3.2.0 — 2026-10-01
 
