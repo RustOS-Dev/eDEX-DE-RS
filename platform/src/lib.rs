@@ -80,6 +80,24 @@ use surface::{SurfaceEntry, SurfaceKind};
 pub use toplevel::{Toplevel, Toplevels};
 use wayland_protocols_wlr::foreign_toplevel::v1::client::zwlr_foreign_toplevel_manager_v1::ZwlrForeignToplevelManagerV1;
 
+/// The Wayland connection as a raw-window-handle display (for wgpu's GLES backend, which needs
+/// the display its EGL surfaces belong to).
+#[derive(Clone, Debug)]
+pub struct DisplayHandle(Connection);
+
+impl raw_window_handle::HasDisplayHandle for DisplayHandle {
+    fn display_handle(
+        &self,
+    ) -> std::result::Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError>
+    {
+        let ptr = NonNull::new(self.0.backend().display_ptr().cast())
+            .ok_or(raw_window_handle::HandleError::Unavailable)?;
+        let raw = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(ptr));
+        // SAFETY: the connection (kept alive by this handle) owns the display.
+        Ok(unsafe { raw_window_handle::DisplayHandle::borrow_raw(raw) })
+    }
+}
+
 /// Identifier of a surface created through the platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SurfaceId(pub u64);
@@ -427,6 +445,11 @@ impl<E: 'static> Platform<E> {
             .dispatch(timeout, self)
             .map_err(|e| anyhow!("event loop dispatch failed: {e}"))?;
         Ok(())
+    }
+
+    /// The connection as a display handle (see [`DisplayHandle`]).
+    pub fn display_handle(&self) -> DisplayHandle {
+        DisplayHandle(self.conn.clone())
     }
 
     pub fn has_layer_shell(&self) -> bool {

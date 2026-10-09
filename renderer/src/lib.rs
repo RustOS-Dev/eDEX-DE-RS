@@ -26,15 +26,25 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    pub fn new(font_family: Option<String>) -> Self {
-        // WGPU_BACKEND=gl|vulkan picks one (e.g. GLES on Mesa EGL where there is no Vulkan
-        // driver, as on RustOS); by default Vulkan, falling back to GL.
-        let backends =
-            wgpu::Backends::from_env().unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::GL);
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+    /// `display` is the Wayland connection the surfaces will belong to: wgpu's GLES backend
+    /// needs it to pick the matching EGL display (Vulkan does not use it).
+    pub fn new(
+        font_family: Option<String>,
+        display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>,
+    ) -> Self {
+        // By default Vulkan, falling back to GL; WGPU_BACKEND=gl|vulkan picks one (e.g. GLES on
+        // Mesa EGL where there is no Vulkan driver, as on RustOS).
+        let desc = match display {
+            Some(d) => wgpu::InstanceDescriptor::new_with_display_handle(d),
+            None => wgpu::InstanceDescriptor::new_without_display_handle(),
+        };
+        // (wgpu's own `with_env` needs its `std` feature, which eDEX leaves off.)
+        let backends = std::env::var("WGPU_BACKEND")
+            .ok()
+            .map(|s| wgpu::Backends::from_comma_list(&s))
+            .filter(|b| !b.is_empty())
+            .unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::GL);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor { backends, ..desc });
         let font_system = FontSystem::new();
         if let Some(fam) = &font_family {
             let available = font_system

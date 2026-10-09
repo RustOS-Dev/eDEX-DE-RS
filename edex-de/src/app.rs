@@ -151,7 +151,7 @@ impl App {
         } else {
             Some(config.appearance.font.clone())
         };
-        let mut gpu = GpuContext::new(font);
+        let mut gpu = GpuContext::new(font, Some(Box::new(platform.display_handle())));
         let metrics = gpu.metrics(config.appearance.font_size, config.terminal.font_size);
         let mut state = ShellState::new(theme, metrics);
         state.boot =

@@ -467,11 +467,13 @@ fn run(cli: Cli) -> Result<i32> {
         .get(&cfg.theme)
         .cloned()
         .unwrap_or_else(::ui::theme::builtin_tron);
-    let mut gpu = GpuContext::new(Some("JetBrainsMono Nerd Font".into()));
-    let metrics = gpu.metrics(cfg.font_size, cfg.font_size);
-
     let (mut event_loop, mut platform): (EventLoop<'static, Platform<Event>>, Platform<Event>) =
         Platform::new()?;
+    let mut gpu = GpuContext::new(
+        Some("JetBrainsMono Nerd Font".into()),
+        Some(Box::new(platform.display_handle())),
+    );
+    let metrics = gpu.metrics(cfg.font_size, cfg.font_size);
     let (tx, rx) = channel::channel::<Event>();
     platform
         .loop_handle
