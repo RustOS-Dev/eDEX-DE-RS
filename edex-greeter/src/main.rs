@@ -83,6 +83,9 @@ pub struct Greeter {
     pub lock: bool,
     /// Set when a lock-screen password was accepted: unlock and exit.
     unlocked: bool,
+    /// The background pulses; off on a software renderer, where every frame costs the CPU a
+    /// full redraw (then the screen changes only with the clock and the input).
+    animate: bool,
     tx: channel::Sender<Event>,
     quit: bool,
     exit_code: i32,
@@ -90,6 +93,9 @@ pub struct Greeter {
 
 impl Greeter {
     pub fn pulse(&self) -> f32 {
+        if !self.animate {
+            return 0.5;
+        }
         (self.started.elapsed().as_secs_f32() * 0.8).sin() * 0.5 + 0.5
     }
 
@@ -104,10 +110,14 @@ impl Greeter {
         }
     }
 
-    fn tick_clock(&mut self) {
+    /// Update the clock; true when the text shown changed.
+    fn tick_clock(&mut self) -> bool {
         let now = chrono::Local::now();
-        self.clock = now.format("%H:%M:%S").to_string();
+        let clock = now.format("%H:%M:%S").to_string();
+        let changed = clock != self.clock;
+        self.clock = clock;
         self.date = now.format("%A %d %B %Y").to_string();
+        changed
     }
 
     fn set_message(&mut self, msg: impl Into<String>, error: bool) {
@@ -411,6 +421,7 @@ fn run(cli: Cli) -> Result<i32> {
         demo,
         lock: cli.lock,
         unlocked: false,
+        animate: true,
         tx,
         quit: false,
         exit_code: 0,
@@ -461,6 +472,10 @@ fn run(cli: Cli) -> Result<i32> {
                                 surface,
                                 SurfaceRenderer::new(&mut gpu, handles, bw, bh, scale as f32)?,
                             );
+                            if g.animate && gpu.is_software() {
+                                info!("software renderer: background animation off");
+                                g.animate = false;
+                            }
                         }
                     }
                     dirty = true;
@@ -507,8 +522,9 @@ fn run(cli: Cli) -> Result<i32> {
                     dirty = true;
                 }
                 PlatformEvent::App(Event::Tick) => {
-                    g.tick_clock();
-                    dirty = true;
+                    if g.tick_clock() || g.animate {
+                        dirty = true;
+                    }
                     if let Some(s) = smoke {
                         if g.started.elapsed() >= s {
                             g.quit = true;

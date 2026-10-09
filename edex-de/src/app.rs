@@ -850,7 +850,11 @@ impl App {
     }
 
     fn cursor_visible(&self) -> bool {
-        if !self.config.terminal.cursor_blink || !self.terminal.cursor_blinks() {
+        // A software renderer redraws the whole canvas for every blink.
+        if !self.config.terminal.cursor_blink
+            || !self.terminal.cursor_blinks()
+            || self.gpu.is_software()
+        {
             return true;
         }
         let since = self.state.now.duration_since(self.last_input).as_millis();
@@ -911,8 +915,9 @@ impl App {
             sysinfo_split: c.layout.sysinfo_split,
             keyboard_visible: c.appearance.keyboard_visible,
         };
-        self.state.scanlines = c.appearance.scanlines;
-        // A software renderer redraws the whole canvas on the CPU: no continuous border pulse there.
+        // A software renderer redraws the whole canvas on the CPU: no continuous border pulse and
+        // no scanline overlay (a full-screen blend, a quarter of a frame on softpipe) there.
+        self.state.scanlines = c.appearance.scanlines && !self.gpu.is_software();
         self.state.animations = c.appearance.animations && !self.gpu.is_software();
         self.terminal.set_config(terminal_config(c));
         apply_notification_config(&mut self.store, c);
@@ -1079,10 +1084,11 @@ impl App {
                     self.state.boot.update(now);
                     dirty = true;
                 }
-                if self.state.animations && self.gpu.is_software() {
+                if (self.state.animations || self.state.scanlines) && self.gpu.is_software() {
                     // The adapter is only known after the first surface is configured.
-                    info!("software renderer: border pulse disabled to save CPU");
+                    info!("software renderer: border pulse, scanlines and cursor blink off to save CPU");
                     self.state.animations = false;
+                    self.state.scanlines = false;
                     dirty = true;
                 }
                 let mut pulse_changed = false;

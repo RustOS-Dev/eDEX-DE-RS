@@ -44,8 +44,10 @@ fn vs_main(@builtin(vertex_index) vi: u32, inst: Instance) -> VsOut {
     out.clip = vec4(ndc, 0.0, 1.0);
     out.local = local;
     out.size = inst.size;
-    out.fill = inst.fill;
-    out.border = inst.border;
+    // Colour conversion once per vertex rather than per fragment (pow is costly on software
+    // rasterizers).
+    out.fill = to_linear(inst.fill);
+    out.border = to_linear(inst.border);
     out.params = inst.params;
     return out;
 }
@@ -81,12 +83,24 @@ fn sd_hexagon(p: vec2<f32>, r: f32) -> f32 {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    // Plain square rectangles (most of the screen: backgrounds, bars, cells) need no distance
+    // field: their quad is the rectangle.
+    if in.params.w < 0.5 && in.params.y <= 0.0 && in.params.x <= 0.0 && in.params.z <= 0.0 {
+        return in.fill;
+    }
     let half = in.size * 0.5;
     let p = in.local - half;
     let kind = u32(in.params.w + 0.5);
     let border_w = in.params.x;
     let radius = in.params.y;
     let glow = in.params.z;
+
+    // Well inside a box, past its border and corners: the fill, without the distance field
+    // (the interior of the big panels, most of their area).
+    let inset = half - vec2(max(radius, border_w) + 1.0);
+    if kind == 0u && abs(p.x) < inset.x && abs(p.y) < inset.y {
+        return in.fill;
+    }
 
     var d: f32;
     if kind == 1u {
@@ -101,8 +115,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Anti-aliasing width of one physical pixel in logical units.
     let aa = 1.0 / max(screen.scale, 0.5);
-    let fill = to_linear(in.fill);
-    let border = to_linear(in.border);
+    let fill = in.fill;
+    let border = in.border;
 
     if d > 0.0 {
         if glow > 0.0 && d < GLOW_PAD {

@@ -145,6 +145,7 @@ impl RectPipeline {
         scene: &Scene,
         scale: f32,
         srgb: bool,
+        background: bool,
     ) {
         queue.write_buffer(
             &self.uniform,
@@ -156,6 +157,17 @@ impl RectPipeline {
             }),
         );
         self.staging.clear();
+        if background {
+            // The scene's clear colour as a first, full-size rectangle (partial redraws
+            // cannot clear the whole target).
+            self.staging.push(GpuRect {
+                pos: [0.0, 0.0],
+                size: [scene.width, scene.height],
+                fill: scene.clear,
+                border: [0.0; 4],
+                params: [0.0; 4],
+            });
+        }
         self.staging.extend(
             scene
                 .rects

@@ -1,6 +1,7 @@
 //! wgpu renderer for eDEX-DE scenes.
 
 mod rects;
+mod retained;
 mod text;
 
 use anyhow::{anyhow, Context, Result};
@@ -12,6 +13,7 @@ use tracing::{info, warn};
 use ui::{layout::Metrics, scene::Scene};
 
 use rects::{RectPipeline, ScanParams, ScanlinePipeline};
+use retained::{BlitPipeline, Canvas, Tiles};
 pub use text::measure_mono;
 use text::TextCache;
 
@@ -104,11 +106,13 @@ impl GpuContext {
         self.font_family = family;
     }
 
-    /// True when rendering runs on the CPU (llvmpipe/lavapipe: VMs, missing GPU drivers).
+    /// True when rendering runs on the CPU (VMs, missing GPU drivers): llvmpipe and lavapipe,
+    /// which wgpu reports as CPU devices, and Mesa's softpipe, which its GL backend does not
+    /// recognise.
     pub fn is_software(&self) -> bool {
         self.adapter
             .as_ref()
-            .is_some_and(|a| a.get_info().device_type == wgpu::DeviceType::Cpu)
+            .is_some_and(|a| is_software_adapter(&a.get_info()))
     }
 
     /// Adapter description for the About page.
@@ -203,6 +207,13 @@ pub struct SurfaceRenderer {
     text_cache: TextCache,
     scale: f32,
     frames: u64,
+    /// CPU time of the last frame (scene upload, text, draw, present).
+    last_frame: std::time::Duration,
+    /// Software rasterizers: redraw only what changed, into a retained canvas
+    /// (`EDEX_FULL_REDRAW=1` turns it off).
+    retained: Option<(BlitPipeline, Option<Canvas>)>,
+    /// Pixels drawn into the canvas by the last frame (retained mode).
+    last_damage: u64,
 }
 
 impl SurfaceRenderer {
@@ -226,15 +237,20 @@ impl SurfaceRenderer {
         let device = ctx.device.as_ref().expect("device");
         let queue = ctx.queue.as_ref().expect("queue");
         let caps = surface.get_capabilities(adapter);
+        // sRGB targets blend in linear light. A software rasterizer converts every blended
+        // pixel to and from sRGB on the CPU, so there the target is a plain UNORM one (colours
+        // are then written as they are, blending happens in sRGB space).
+        let want_srgb = !ctx.is_software();
         let format = caps
             .formats
             .iter()
             .copied()
             .find(|f| {
-                matches!(
-                    f,
-                    wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Rgba8UnormSrgb
-                )
+                f.is_srgb() == want_srgb
+                    && matches!(
+                        f.remove_srgb_suffix(),
+                        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Rgba8Unorm
+                    )
             })
             .or_else(|| caps.formats.first().copied())
             .ok_or_else(|| anyhow!("surface exposes no texture formats"))?;
@@ -283,7 +299,14 @@ impl SurfaceRenderer {
         );
         let cache = ctx.glyph_cache.as_ref().expect("glyph cache");
         let viewport = Viewport::new(device, cache);
-        let mut atlas = TextAtlas::new(device, queue, cache, format);
+        // Text colours are sRGB values: converted to linear for an sRGB target (`Accurate`),
+        // written as they are to a plain one (`Web`, software rasterizers).
+        let color_mode = if format.is_srgb() {
+            glyphon::ColorMode::Accurate
+        } else {
+            glyphon::ColorMode::Web
+        };
+        let mut atlas = TextAtlas::with_color_mode(device, queue, cache, format, color_mode);
         let text_renderer =
             TextRenderer::new(&mut atlas, device, wgpu::MultisampleState::default(), None);
         Ok(Self {
@@ -297,6 +320,10 @@ impl SurfaceRenderer {
             text_cache: TextCache::new(ctx.font_family.clone()),
             scale,
             frames: 0,
+            last_frame: std::time::Duration::ZERO,
+            retained: (ctx.is_software() && std::env::var_os("EDEX_FULL_REDRAW").is_none())
+                .then(|| (BlitPipeline::new(device, format), None)),
+            last_damage: 0,
         })
     }
 
@@ -322,6 +349,16 @@ impl SurfaceRenderer {
         self.frames
     }
 
+    /// How long the last frame took to prepare, draw and present.
+    pub fn last_frame_time(&self) -> std::time::Duration {
+        self.last_frame
+    }
+
+    /// Whether frames redraw only what changed (software rasterizers).
+    pub fn partial_redraws(&self) -> bool {
+        self.retained.is_some()
+    }
+
     pub fn format(&self) -> wgpu::TextureFormat {
         self.config.format
     }
@@ -329,6 +366,7 @@ impl SurfaceRenderer {
     /// Render a scene and present it. Returns `Ok(false)` if the swapchain was lost and
     /// reconfigured (the caller should render again next frame).
     pub fn render(&mut self, ctx: &mut GpuContext, scene: &Scene) -> Result<bool> {
+        let started = std::time::Instant::now();
         let device = ctx.device.as_ref().context("no device")?;
         let queue = ctx.queue.as_ref().context("no queue")?;
         self.text_cache.set_family(ctx.font_family.clone());
@@ -352,8 +390,6 @@ impl SurfaceRenderer {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        self.rects.upload(device, queue, scene, self.scale, srgb);
 
         self.text_cache.begin_frame();
         let keys: Vec<u64> = scene
@@ -404,7 +440,77 @@ impl SurfaceRenderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("edex frame"),
         });
-        {
+        if let Some((blit, canvas)) = self.retained.as_mut() {
+            // Retained mode: draw the changed tiles into the canvas, then copy it to the frame.
+            if canvas.as_ref().is_none_or(|c| c.size() != physical) {
+                *canvas = Some(Canvas::new(
+                    device,
+                    blit,
+                    self.config.format,
+                    physical.0,
+                    physical.1,
+                ));
+            }
+            let canvas = canvas.as_mut().expect("canvas");
+            let tiles = Tiles::of(scene, self.scale, physical.0, physical.1);
+            let damage = tiles.damage(canvas.tiles.as_ref());
+            canvas.tiles = Some(tiles);
+            self.last_damage = damage.iter().map(|d| d.w as u64 * d.h as u64).sum();
+            if !damage.is_empty() {
+                // The clear colour goes in as a background rectangle: a scissored pass
+                // cannot clear only the damaged part.
+                self.rects
+                    .upload(device, queue, scene, self.scale, srgb, true);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("edex partial pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &canvas.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                for d in &damage {
+                    pass.set_scissor_rect(d.x, d.y, d.w, d.h);
+                    self.rects.draw(&mut pass);
+                    if let Err(e) =
+                        self.text_renderer
+                            .render(&self.atlas, &self.viewport, &mut pass)
+                    {
+                        warn!("text render failed: {e:?}");
+                    }
+                }
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("edex present pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            blit.draw(&mut pass, &canvas.bind_group);
+            if scene.scanlines.is_some() {
+                self.scanlines.draw(&mut pass);
+            }
+        } else {
+            self.rects
+                .upload(device, queue, scene, self.scale, srgb, false);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("edex pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -441,6 +547,24 @@ impl SurfaceRenderer {
         frame.present();
         self.atlas.trim();
         self.frames += 1;
+        self.last_frame = started.elapsed();
+        let ms = self.last_frame.as_millis();
+        if self.frames == 1 {
+            info!(
+                ms,
+                width = physical.0,
+                height = physical.1,
+                partial = self.retained.is_some(),
+                "first frame presented"
+            );
+        } else {
+            tracing::debug!(
+                ms,
+                frame = self.frames,
+                damage = self.last_damage,
+                "frame presented"
+            );
+        }
         Ok(true)
     }
 
@@ -451,6 +575,24 @@ impl SurfaceRenderer {
     pub fn rect_capacity(&self) -> usize {
         self.rects.instance_capacity()
     }
+}
+
+/// A CPU rasterizer: wgpu says so for llvmpipe and lavapipe; softpipe (Mesa without LLVM, as on
+/// RustOS) and the swrast drivers show up as "other" GL devices, recognised by their names.
+pub fn is_software_adapter(info: &wgpu::AdapterInfo) -> bool {
+    if info.device_type == wgpu::DeviceType::Cpu {
+        return true;
+    }
+    let name = info.name.to_ascii_lowercase();
+    [
+        "softpipe",
+        "llvmpipe",
+        "lavapipe",
+        "swrast",
+        "software rasterizer",
+    ]
+    .iter()
+    .any(|s| name.contains(s))
 }
 
 fn to_linear_if(c: [f32; 4], srgb: bool) -> [f32; 4] {

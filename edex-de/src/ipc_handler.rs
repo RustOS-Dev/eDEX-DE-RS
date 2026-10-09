@@ -226,6 +226,8 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "version": app.state.version,
         "uptime_secs": app.started.elapsed().as_secs(),
         "frames": app.frames,
+        "frame_ms": app.outputs.first().and_then(|o| app.renderers.get(&o.canvas)).map(|r| r.last_frame_time().as_millis() as u64),
+        "partial_redraws": app.outputs.first().and_then(|o| app.renderers.get(&o.canvas)).map(|r| r.partial_redraws()),
         "gpu": app.gpu.adapter_info(),
         "outputs": outputs,
         "compositor": {"connected": app.comp_state.connected, "version": app.comp_state.version, "workspaces": app.state.workspaces.len(), "windows": app.comp_state.windows.len(), "active_window": app.state.active_window},
