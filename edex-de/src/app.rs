@@ -124,6 +124,9 @@ pub struct App {
     pub started: Instant,
     pub quit: bool,
     pub frames: u64,
+    /// Time to build and draw the canvas (the whole shell): the last frame and a running
+    /// average, in milliseconds. A software renderer spends most of its CPU here.
+    pub canvas_ms: (f32, f32),
     pub tx: Arc<Mutex<channel::Sender<AppEvent>>>,
     pub focus_surface: Option<SurfaceId>,
     /// Canvas holding an exclusive keyboard grab: until focus arrives (Hyprland), or for as long
@@ -307,6 +310,7 @@ impl App {
             started: Instant::now(),
             quit: false,
             frames: 0,
+            canvas_ms: (0.0, 0.0),
             tx,
             focus_surface: None,
             install_button: false,
@@ -774,6 +778,7 @@ impl App {
             }
         }
         self.state.now = Instant::now();
+        let started = self.state.now;
         let (wf, hf) = (w as f32, h as f32);
         let rendered = match role {
             SurfaceRole::Canvas => {
@@ -814,6 +819,15 @@ impl App {
             Ok(true) => {
                 self.frames += 1;
                 self.dirty.remove(&id);
+                if role == SurfaceRole::Canvas {
+                    let ms = started.elapsed().as_secs_f32() * 1000.0;
+                    let avg = if self.canvas_ms.1 == 0.0 {
+                        ms
+                    } else {
+                        self.canvas_ms.1 * 0.9 + ms * 0.1
+                    };
+                    self.canvas_ms = (ms, avg);
+                }
             }
             Ok(false) => {
                 // Surface lost/outdated: keep dirty and retry on the next frame.

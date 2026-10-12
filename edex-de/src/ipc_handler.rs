@@ -242,6 +242,7 @@ pub fn state_json(app: &App, platform: &Platform<AppEvent>) -> serde_json::Value
         "version": app.state.version,
         "uptime_secs": app.started.elapsed().as_secs(),
         "frames": app.frames,
+        "canvas_ms": {"last": app.canvas_ms.0.round(), "avg": app.canvas_ms.1.round()},
         "gpu": app.gpu.adapter_info(),
         "outputs": outputs,
         "hyprland": {"connected": app.wm.kind() == wm::WmKind::Hyprland && app.wm.state().connected, "version": app.wm.state().version, "workspaces": app.state.workspaces.len(), "active_window": app.state.active_window},
