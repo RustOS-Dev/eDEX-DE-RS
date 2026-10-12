@@ -16,6 +16,8 @@ members = [
     "wm",
 ]
 resolver = "2"
+# Vendored crates (see third_party/README.md) are not workspace members.
+exclude = ["third_party"]
 
 [workspace.package]
 version = "3.2.0"
@@ -73,3 +75,7 @@ fuzzy-matcher = "0.3"
 xdg = "2"
 insta = "1"
 tempfile = "3"
+
+[patch.crates-io]
+# wgpu-hal 29.0.4 with the GL binding-layout fix (third_party/README.md).
+wgpu-hal = { path = "third_party/wgpu-hal" }

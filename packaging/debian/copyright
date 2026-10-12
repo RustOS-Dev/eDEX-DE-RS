@@ -6,3 +6,8 @@ Files: *
 Copyright: 2024-2026 eDEX-OS contributors
 License: GPL-3.0-only
  See /usr/share/common-licenses/GPL-3.
+
+Files: third_party/wgpu-hal/*
+Copyright: The gfx-rs developers
+License: MIT or Apache-2.0
+ See third_party/wgpu-hal/LICENSE.MIT and third_party/wgpu-hal/LICENSE.APACHE.

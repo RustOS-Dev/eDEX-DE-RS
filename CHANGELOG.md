@@ -22,6 +22,11 @@
 * **Greeter without greetd.** `edex-greeter --backend local` checks passwords against passwd and
   shadow (SHA-512 crypt) and writes the user name for the session script, which starts the
   session with `edex-greeter run-as USER -- …`; the default backend picks it on RustOS.
+* **Text on GL 3.3 software renderers.** wgpu-hal 29 is patched (`third_party/wgpu-hal`) so that
+  a GL 3.3 context offering `GL_ARB_compute_shader` (Mesa's softpipe) binds textures by name: wgpu
+  assumed naga writes `layout(binding = N)` there, naga does not before GLSL 4.20, and every
+  texture read unit 0 (no glyphs). `MESA_EXTENSION_OVERRIDE=-GL_ARB_compute_shader` is no longer
+  needed.
 * D-Bus is optional: without a session bus the shell runs without the notifications server.
 * Launching no longer needs `setsid` or `timeout` binaries; `edex-de ipc launcher` (and the other
   overlay names) shows that overlay; a system-wide `config.toml` in the share directory provides
