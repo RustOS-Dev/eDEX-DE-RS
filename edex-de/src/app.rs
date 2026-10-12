@@ -127,6 +127,8 @@ pub struct App {
     /// Time to build and draw the canvas (the whole shell): the last frame and a running
     /// average, in milliseconds. A software renderer spends most of its CPU here.
     pub canvas_ms: (f32, f32),
+    /// When the dashboard last asked for a canvas redraw.
+    last_sysmon_redraw: Instant,
     pub tx: Arc<Mutex<channel::Sender<AppEvent>>>,
     pub focus_surface: Option<SurfaceId>,
     /// Canvas holding an exclusive keyboard grab: until focus arrives (Hyprland), or for as long
@@ -311,6 +313,7 @@ impl App {
             quit: false,
             frames: 0,
             canvas_ms: (0.0, 0.0),
+            last_sysmon_redraw: Instant::now(),
             tx,
             focus_surface: None,
             install_button: false,
@@ -1130,7 +1133,14 @@ impl App {
             }
             Tick::Sysmon => {
                 crate::status::refresh_sysinfo(self);
-                self.mark_canvas_dirty();
+                // Where a canvas takes longer than the tick to draw (software rendering on a
+                // slow CPU), redraws for the dashboard alone would follow one another and keys
+                // would wait for a whole extra frame: redraw for it at most every two frames.
+                let interval = Duration::from_secs_f32((self.canvas_ms.1 * 2.0 / 1000.0).max(1.0));
+                if self.last_sysmon_redraw.elapsed() + Duration::from_millis(50) >= interval {
+                    self.last_sysmon_redraw = Instant::now();
+                    self.mark_canvas_dirty();
+                }
             }
             Tick::Privacy => {
                 // Redraw only when an indicator changed: a software renderer redraws the
