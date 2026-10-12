@@ -1119,11 +1119,14 @@ impl App {
                 self.mark_canvas_dirty();
             }
             Tick::Privacy => {
-                crate::status::refresh_privacy(self);
+                // Redraw only when an indicator changed: a software renderer redraws the
+                // whole canvas.
+                if crate::status::refresh_privacy(self) {
+                    self.mark_canvas_dirty();
+                }
                 if self.state.overlay == Some(OverlayKind::Privacy) {
                     self.system.send(SysRequest::PrivacyQuery);
                 }
-                self.mark_canvas_dirty();
             }
             Tick::Anim => {
                 let now = Instant::now();

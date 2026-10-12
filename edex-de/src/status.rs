@@ -63,9 +63,11 @@ pub fn refresh_sysinfo(app: &mut App) {
     }
 }
 
-pub fn refresh_privacy(app: &mut App) {
+/// Returns whether an indicator changed (the canvas needs a redraw).
+pub fn refresh_privacy(app: &mut App) -> bool {
     let fprintd = app.sysmon.process_running("fprintd");
     let p = app.privacy_probe.probe(fprintd);
+    let before = app.state.status.clone();
     let st = &mut app.state.status;
     st.tor_mode = p.tor_mode.clone();
     st.tor_active = p.tor_active;
@@ -75,6 +77,7 @@ pub fn refresh_privacy(app: &mut App) {
     st.fprintd_active = p.fprintd_active;
     st.mic_active = p.mic_active;
     st.camera_active = p.camera_active;
+    *st != before
 }
 
 /// Rebuild the toast list in the shell state from the notification store.
